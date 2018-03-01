@@ -12,6 +12,7 @@ import (
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
+	calicoerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ const (
 	globalLabel          = "remesher.tsuru.io/global"
 	asNumber             = client.GlobalDefaultASNumber
 	remesherManagedLabel = "remesher.tsuru.io/managed"
+	calicoTimeout        = time.Second * 5
 )
 
 var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
@@ -209,20 +211,28 @@ func (c *Controller) addNode(node *corev1.Node) error {
 	logger.Infof("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
 
 	for _, p := range toAdd {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 		_, err := c.calicoClient.BGPPeers().Create(ctx, &p, options.SetOptions{})
 		cancel()
 		if err != nil {
+			if _, ok := err.(calicoerrors.ErrorResourceAlreadyExists); ok {
+				logger.Infof("ignoring error creating bgpPeer %v: %v", p.Name, err)
+				continue
+			}
 			// TODO: add to multierror and return the multierror
 			logger.Errorf("failed to create bgpPeer %v: %v", p, err)
 		}
 	}
 
 	for _, p := range toRemove {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 		_, err := c.calicoClient.BGPPeers().Delete(ctx, p.Name, options.DeleteOptions{})
 		cancel()
 		if err != nil {
+			if _, ok := err.(calicoerrors.ErrorResourceDoesNotExist); ok {
+				logger.Infof("ignoring error deleting bgpPeer %v: %v", p.Name, err)
+				continue
+			}
 			// TODO: add to multierror and return the multierror
 			logger.Errorf("failed to remove bgpPeer %v: %v", p.Name, err)
 		}
@@ -231,7 +241,9 @@ func (c *Controller) addNode(node *corev1.Node) error {
 }
 
 func (c *Controller) removeNode(name string) error {
-	c.logger.WithField("node", name).Info("handling remove operation")
+	logger := c.logger.WithField("node", name)
+	logger.Info("handling remove operation")
+	//currPeers, err := getCurrentBGPPeers()
 	return nil
 }
 
@@ -307,7 +319,7 @@ func (c *Controller) getCurrentBGPPeers(node *corev1.Node) ([]calicoapiv3.BGPPee
 	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
 	// perhaps using the Kubernetes API directly thru listers with caching instead of
 	// using the calico client (which means we would only support kubernetes backend)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 	defer cancel()
 	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
 	if err != nil {
