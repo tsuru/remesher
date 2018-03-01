@@ -20,40 +20,58 @@ func Test_deltaPeers(t *testing.T) {
 		{
 			name: "all to be added",
 			desired: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 			wantToAdd: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 		},
 		{
 			name: "all to be removed",
 			current: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 			wantToRemove: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 		},
 		{
 			name: "some to add and some to remove",
 			current: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 			desired: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1"),
-				newBGPPeer("node1", "192.168.0.3"),
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.3", true),
 			},
 			wantToRemove: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.2"),
+				newBGPPeer("node1", "192.168.0.2", true),
 			},
 			wantToAdd: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.3"),
+				newBGPPeer("node1", "192.168.0.3", true),
+			},
+		},
+		{
+			name: "ignore unmanaged bgpeers",
+			current: []calicoapiv3.BGPPeer{
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.4", false),
+			},
+			desired: []calicoapiv3.BGPPeer{
+				newBGPPeer("node1", "192.168.0.1", true),
+				newBGPPeer("node1", "192.168.0.3", true),
+			},
+			wantToRemove: []calicoapiv3.BGPPeer{
+				newBGPPeer("node1", "192.168.0.2", true),
+			},
+			wantToAdd: []calicoapiv3.BGPPeer{
+				newBGPPeer("node1", "192.168.0.3", true),
 			},
 		},
 	}
@@ -66,14 +84,20 @@ func Test_deltaPeers(t *testing.T) {
 	}
 }
 
-func newBGPPeer(node, peerIP string) calicoapiv3.BGPPeer {
-	return calicoapiv3.BGPPeer{
+func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
+	peer := calicoapiv3.BGPPeer{
 		Spec: calicoapiv3.BGPPeerSpec{
 			Node:     node,
 			PeerIP:   peerIP,
 			ASNumber: asNumber,
 		},
 	}
+	if managed {
+		peer.ObjectMeta.Annotations = map[string]string{
+			remesherManagedLabel: "true",
+		}
+	}
+	return peer
 }
 
 func Test_buildPeer(t *testing.T) {
@@ -97,6 +121,9 @@ func Test_buildPeer(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "remesher-global-node1",
 					Annotations: map[string]string{
+						"remesher.tsuru.io/managed": "true",
+					},
+					Labels: map[string]string{
 						"remesher.tsuru.io/managed": "true",
 					},
 				},

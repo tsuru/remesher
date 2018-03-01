@@ -30,11 +30,12 @@ import (
 )
 
 const (
-	controllerAgentName = "remesher-controller"
-	maxRetries          = 5
-	masterLabel         = "node-role.kubernetes.io/master"
-	globalLabel         = "remesher.tsuru.io/global"
-	asNumber            = client.GlobalDefaultASNumber
+	controllerAgentName  = "remesher-controller"
+	maxRetries           = 5
+	masterLabel          = "node-role.kubernetes.io/master"
+	globalLabel          = "remesher.tsuru.io/global"
+	asNumber             = client.GlobalDefaultASNumber
+	remesherManagedLabel = "remesher.tsuru.io/managed"
 )
 
 var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
@@ -258,6 +259,9 @@ func deltaPeers(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGP
 		toAdd = append(toAdd, d)
 	}
 	for _, c := range currMap {
+		if _, ok := c.Annotations[remesherManagedLabel]; !ok {
+			continue
+		}
 		toRemove = append(toRemove, c)
 	}
 	return toAdd, toRemove
@@ -278,7 +282,10 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "remesher-" + name,
 			Annotations: map[string]string{
-				"remesher.tsuru.io/managed": "true",
+				remesherManagedLabel: "true",
+			},
+			Labels: map[string]string{
+				remesherManagedLabel: "true",
 			},
 		},
 		Spec: calicoapiv3.BGPPeerSpec{
