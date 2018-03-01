@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/tsuru/remesher/pkg/controller"
 
 	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
 	kubeinformers "k8s.io/client-go/informers"
@@ -47,11 +48,11 @@ func main() {
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 
-	controller := NewController(kubeClient, kubeInformerFactory, entry, neighborsLabel, calicoClient)
+	ctl := controller.NewController(kubeClient, kubeInformerFactory, entry, neighborsLabel, calicoClient)
 
 	go kubeInformerFactory.Start(stopCh)
 
-	if err = controller.Run(2, stopCh); err != nil {
+	if err = ctl.Run(2, stopCh); err != nil {
 		entry.Fatalf("Error running controller: %s", err.Error())
 	}
 }
