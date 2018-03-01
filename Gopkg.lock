@@ -295,7 +295,9 @@
     "lib/backend/syncersv1/felixsyncer",
     "lib/backend/syncersv1/updateprocessors",
     "lib/backend/watchersyncer",
+    "lib/client",
     "lib/clientv3",
+    "lib/converter",
     "lib/errors",
     "lib/hash",
     "lib/ipam",
@@ -310,6 +312,7 @@
     "lib/selector/parser",
     "lib/selector/tokenizer",
     "lib/set",
+    "lib/validator/v1",
     "lib/validator/v3",
     "lib/watch"
   ]
@@ -692,6 +695,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "6dbfa2902a55ac6fe1aff3a3da55a4d6d9146d3b39e442676eb981050ee54991"
+  inputs-digest = "bb1d1933721c7d388ac13bcc6886ef00663910f03b8c47d4ae0b490302b2a7ad"
   solver-name = "gps-cdcl"
   solver-version = 1
