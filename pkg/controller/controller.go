@@ -57,6 +57,7 @@ type Controller struct {
 
 	neighborsLabel string
 
+	//TODO: extract this to another pkg and require a minimal interface here
 	calicoClient calicoclientv3.Interface
 }
 
@@ -224,7 +225,25 @@ func (c *Controller) addNode(node *corev1.Node) error {
 		}
 	}
 
-	for _, p := range toRemove {
+	return c.removePeers(toRemove, logger)
+}
+
+func (c *Controller) removeNode(name string) error {
+	logger := c.logger.WithField("node", name)
+	logger.Info("handling remove operation")
+	//currPeers, err := getCurrentBGPPeers()
+	currPeers, err := c.getCurrentBGPPeersByNodeName(name)
+	if err != nil {
+		return err
+	}
+	//TODO: add a way to force the removal of BGPPeers that refer to this nodes address
+	//maybe adding a annotation to every BGPPeer that specifies the name of the node
+	//refered on the address field
+	return c.removePeers(currPeers, logger)
+}
+
+func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) error {
+	for _, p := range peers {
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 		_, err := c.calicoClient.BGPPeers().Delete(ctx, p.Name, options.DeleteOptions{})
 		cancel()
@@ -237,13 +256,6 @@ func (c *Controller) addNode(node *corev1.Node) error {
 			logger.Errorf("failed to remove bgpPeer %v: %v", p.Name, err)
 		}
 	}
-	return nil
-}
-
-func (c *Controller) removeNode(name string) error {
-	logger := c.logger.WithField("node", name)
-	logger.Info("handling remove operation")
-	//currPeers, err := getCurrentBGPPeers()
 	return nil
 }
 
@@ -336,6 +348,22 @@ func (c *Controller) getCurrentBGPPeers(node *corev1.Node) ([]calicoapiv3.BGPPee
 				peers = append(peers, p)
 				break
 			}
+		}
+	}
+	return peers, nil
+}
+
+func (c *Controller) getCurrentBGPPeersByNodeName(nodeName string) ([]calicoapiv3.BGPPeer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
+	defer cancel()
+	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", nodeName, err)
+	}
+	var peers []calicoapiv3.BGPPeer
+	for _, p := range list.Items {
+		if p.Spec.Node == nodeName {
+			peers = append(peers, p)
 		}
 	}
 	return peers, nil
