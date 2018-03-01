@@ -191,16 +191,17 @@ func (c *Controller) addNode(node *corev1.Node) error {
 	if err != nil {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
-	// TODO: support an additional custom label for global peers
-	if isMaster(node) {
+	var expectedPeers []calicoapiv3.BGPPeer
+	if isMaster(node) { // TODO: support an additional custom label for global peers
 		logger.Infof("handling as global peer")
-		// TODO: add master nodes as global peers and remove all direct peers
+		expectedPeers = append(expectedPeers, buildPeer(nil, node))
+	} else {
+		neightbors, err := c.getBGPNeighbors(node)
+		if err != nil {
+			return fmt.Errorf("failed to get node neighbors: %v", err)
+		}
+		expectedPeers = c.buildMesh(node, neightbors)
 	}
-	neightbors, err := c.getBGPNeighbors(node)
-	if err != nil {
-		return fmt.Errorf("failed to get node neighbors: %v", err)
-	}
-	expectedPeers := c.buildMesh(node, neightbors)
 	logger.Infof("current peers: %+#v - expected peers: %+#v", currPeers, expectedPeers)
 	toAdd, toRemove := deltaPeers(currPeers, expectedPeers)
 	logger.Infof("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
@@ -261,9 +262,17 @@ func deltaPeers(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGP
 	return toAdd, toRemove
 }
 
+// buildPeer builds a BGPPeer using from as Node and to IP as PeerIP
+// creates a global bgpPEer if from is not set
 func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 	//TODO: consider nodes with multiple addresses
-	name := strings.ToLower(kubeNameRegex.ReplaceAllString(from.Name+"-"+to.Name, "-"))
+	var name, node string
+	if from != nil {
+		name = strings.ToLower(kubeNameRegex.ReplaceAllString(from.Name+"-"+to.Name, "-"))
+		node = from.Name
+	} else {
+		name = strings.ToLower(kubeNameRegex.ReplaceAllString("global-"+to.Name, "-"))
+	}
 	return calicoapiv3.BGPPeer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "remesher-" + name,
@@ -272,7 +281,7 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 			},
 		},
 		Spec: calicoapiv3.BGPPeerSpec{
-			Node:     from.Name,
+			Node:     node,
 			PeerIP:   to.Status.Addresses[0].Address,
 			ASNumber: asNumber,
 		},

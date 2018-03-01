@@ -5,6 +5,8 @@ import (
 
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_deltaPeers(t *testing.T) {
@@ -71,5 +73,44 @@ func newBGPPeer(node, peerIP string) calicoapiv3.BGPPeer {
 			PeerIP:   peerIP,
 			ASNumber: asNumber,
 		},
+	}
+}
+
+func Test_buildPeer(t *testing.T) {
+	tests := []struct {
+		name string
+		from *corev1.Node
+		to   *corev1.Node
+		want calicoapiv3.BGPPeer
+	}{
+		{
+			name: "global",
+			to: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{{Address: "192.168.10.1"}},
+				},
+			},
+			want: calicoapiv3.BGPPeer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "remesher-global-node1",
+					Annotations: map[string]string{
+						"remesher.tsuru.io/managed": "true",
+					},
+				},
+				Spec: calicoapiv3.BGPPeerSpec{
+					PeerIP:   "192.168.10.1",
+					ASNumber: asNumber,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildPeer(tt.from, tt.to)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
