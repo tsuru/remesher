@@ -235,6 +235,9 @@ func (c *Controller) removeNode(name string) error {
 func (c *Controller) buildMesh(node *corev1.Node, toNodes []*corev1.Node) []calicoapiv3.BGPPeer {
 	var peers []calicoapiv3.BGPPeer
 	for _, n := range toNodes {
+		if node.Name == n.Name {
+			continue
+		}
 		peers = append(peers, buildPeer(node, n), buildPeer(n, node))
 	}
 	return peers
