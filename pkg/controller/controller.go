@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -257,10 +256,11 @@ func (c *Controller) getCurrentBGPPeers(node *corev1.Node) ([]calicoapiv3.BGPPee
 }
 
 func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
-	// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
 	v, ok := node.Labels[c.neighborsLabel]
 	if !ok {
-		return nil, errors.New("node missing neighborsLabel")
+		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborsLabel)
+		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
+		return nil, nil
 	}
 	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborsLabel: v}))
 }
