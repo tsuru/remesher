@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -14,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeinformers "k8s.io/client-go/informers"
@@ -32,6 +35,8 @@ const (
 	masterLabel         = "node-role.kubernetes.io/master"
 	asNumber            = client.GlobalDefaultASNumber
 )
+
+var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
 
 // Controller is a controller that watches for node changes and updates BGPPeers resources
 type Controller struct {
@@ -180,14 +185,15 @@ func (c *Controller) processItem(key string) error {
 }
 
 func (c *Controller) addNode(node *corev1.Node) error {
-	c.logger.WithField("node", node.Name).Info("handling add operation")
+	logger := c.logger.WithField("node", node.Name)
+	logger.Info("handling add operation")
 	currPeers, err := c.getCurrentBGPPeers(node)
 	if err != nil {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
 	// TODO: support an additional custom label for global peers
 	if isMaster(node) {
-		c.logger.WithField("node", node.Name).Infof("handling as global peer")
+		logger.Infof("handling as global peer")
 		// TODO: add master nodes as global peers and remove all direct peers
 	}
 	neightbors, err := c.getBGPNeighbors(node)
@@ -195,7 +201,29 @@ func (c *Controller) addNode(node *corev1.Node) error {
 		return fmt.Errorf("failed to get node neighbors: %v", err)
 	}
 	expectedPeers := c.buildMesh(node, neightbors)
-	c.logger.WithField("node", node.Name).Infof("current peers: %v - expected peers: %v", currPeers, expectedPeers)
+	logger.Infof("current peers: %+#v - expected peers: %+#v", currPeers, expectedPeers)
+	toAdd, toRemove := deltaPeers(currPeers, expectedPeers)
+	logger.Infof("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
+
+	for _, p := range toAdd {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		_, err := c.calicoClient.BGPPeers().Create(ctx, &p, options.SetOptions{})
+		cancel()
+		if err != nil {
+			// TODO: add to multierror and return the multierror
+			logger.Errorf("failed to create bgpPeer %v: %v", p, err)
+		}
+	}
+
+	for _, p := range toRemove {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		_, err := c.calicoClient.BGPPeers().Delete(ctx, p.Name, options.DeleteOptions{})
+		cancel()
+		if err != nil {
+			// TODO: add to multierror and return the multierror
+			logger.Errorf("failed to remove bgpPeer %v: %v", p.Name, err)
+		}
+	}
 	return nil
 }
 
@@ -212,9 +240,34 @@ func (c *Controller) buildMesh(node *corev1.Node, toNodes []*corev1.Node) []cali
 	return peers
 }
 
+func deltaPeers(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGPPeer, toRemove []calicoapiv3.BGPPeer) {
+	currMap := make(map[calicoapiv3.BGPPeerSpec]calicoapiv3.BGPPeer)
+	for _, c := range current {
+		currMap[c.Spec] = c
+	}
+	for _, d := range desired {
+		if _, ok := currMap[d.Spec]; ok {
+			delete(currMap, d.Spec)
+			continue
+		}
+		toAdd = append(toAdd, d)
+	}
+	for _, c := range currMap {
+		toRemove = append(toRemove, c)
+	}
+	return toAdd, toRemove
+}
+
 func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 	//TODO: consider nodes with multiple addresses
+	name := strings.ToLower(kubeNameRegex.ReplaceAllString(from.Name+"-"+to.Name, "-"))
 	return calicoapiv3.BGPPeer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "remesher-" + name,
+			Annotations: map[string]string{
+				"remesher.tsuru.io/managed": "true",
+			},
+		},
 		Spec: calicoapiv3.BGPPeerSpec{
 			Node:     from.Name,
 			PeerIP:   to.Status.Addresses[0].Address,
