@@ -78,8 +78,8 @@ func Test_deltaPeers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotToAdd, gotToRemove := deltaPeers(tt.current, tt.desired)
-			assert.Equal(t, tt.wantToAdd, gotToAdd)
-			assert.Equal(t, tt.wantToRemove, gotToRemove)
+			assert.ElementsMatch(t, tt.wantToAdd, gotToAdd)
+			assert.ElementsMatch(t, tt.wantToRemove, gotToRemove)
 		})
 	}
 }
