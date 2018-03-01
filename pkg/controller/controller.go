@@ -33,6 +33,7 @@ const (
 	controllerAgentName = "remesher-controller"
 	maxRetries          = 5
 	masterLabel         = "node-role.kubernetes.io/master"
+	globalLabel         = "remesher.tsuru.io/global"
 	asNumber            = client.GlobalDefaultASNumber
 )
 
@@ -192,8 +193,8 @@ func (c *Controller) addNode(node *corev1.Node) error {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
 	var expectedPeers []calicoapiv3.BGPPeer
-	if isMaster(node) { // TODO: support an additional custom label for global peers
-		logger.Infof("handling as global peer")
+	if isGlobal(node) {
+		logger.Infof("should be added as global peer")
 		expectedPeers = append(expectedPeers, buildPeer(nil, node))
 	} else {
 		neightbors, err := c.getBGPNeighbors(node)
@@ -288,9 +289,10 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 	}
 }
 
-func isMaster(node *corev1.Node) bool {
-	_, ok := node.Labels[masterLabel]
-	return ok
+func isGlobal(node *corev1.Node) bool {
+	_, master := node.Labels[masterLabel]
+	_, global := node.Labels[globalLabel]
+	return master || global
 }
 
 // getCurrentBGPPeers returns all BGPPeers that refer to the node in calico (both ways)
