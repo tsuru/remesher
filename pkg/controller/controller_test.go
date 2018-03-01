@@ -56,24 +56,6 @@ func Test_deltaPeers(t *testing.T) {
 				newBGPPeer("node1", "192.168.0.3", true),
 			},
 		},
-		{
-			name: "ignore unmanaged bgpeers",
-			current: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
-				newBGPPeer("node1", "192.168.0.4", false),
-			},
-			desired: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.3", true),
-			},
-			wantToRemove: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.2", true),
-			},
-			wantToAdd: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.3", true),
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,10 +103,12 @@ func Test_buildPeer(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "remesher-global-node1",
 					Annotations: map[string]string{
-						"remesher.tsuru.io/managed": "true",
+						"remesher.tsuru.io/managed":   "true",
+						"remesher.tsuru.io/peer-node": "node1",
 					},
 					Labels: map[string]string{
-						"remesher.tsuru.io/managed": "true",
+						"remesher.tsuru.io/managed":   "true",
+						"remesher.tsuru.io/peer-node": "node1",
 					},
 				},
 				Spec: calicoapiv3.BGPPeerSpec{

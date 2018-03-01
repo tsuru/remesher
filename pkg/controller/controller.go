@@ -31,13 +31,14 @@ import (
 )
 
 const (
-	controllerAgentName  = "remesher-controller"
-	maxRetries           = 5
-	masterLabel          = "node-role.kubernetes.io/master"
-	globalLabel          = "remesher.tsuru.io/global"
-	asNumber             = client.GlobalDefaultASNumber
-	remesherManagedLabel = "remesher.tsuru.io/managed"
-	calicoTimeout        = time.Second * 5
+	controllerAgentName   = "remesher-controller"
+	maxRetries            = 5
+	masterLabel           = "node-role.kubernetes.io/master"
+	globalLabel           = "remesher.tsuru.io/global"
+	asNumber              = client.GlobalDefaultASNumber
+	remesherManagedLabel  = "remesher.tsuru.io/managed"
+	remesherPeerNodeLabel = "remesher.tsuru.io/peer-node"
+	calicoTimeout         = time.Second * 5
 )
 
 var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
@@ -192,7 +193,7 @@ func (c *Controller) processItem(key string) error {
 func (c *Controller) addNode(node *corev1.Node) error {
 	logger := c.logger.WithField("node", node.Name)
 	logger.Info("handling add operation")
-	currPeers, err := c.getCurrentBGPPeers(node)
+	currPeers, err := c.getCurrentBGPPeers(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
@@ -231,19 +232,19 @@ func (c *Controller) addNode(node *corev1.Node) error {
 func (c *Controller) removeNode(name string) error {
 	logger := c.logger.WithField("node", name)
 	logger.Info("handling remove operation")
-	//currPeers, err := getCurrentBGPPeers()
-	currPeers, err := c.getCurrentBGPPeersByNodeName(name)
+	currPeers, err := c.getCurrentBGPPeers(name)
 	if err != nil {
 		return err
 	}
-	//TODO: add a way to force the removal of BGPPeers that refer to this nodes address
-	//maybe adding a annotation to every BGPPeer that specifies the name of the node
-	//refered on the address field
 	return c.removePeers(currPeers, logger)
 }
 
 func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) error {
 	for _, p := range peers {
+		if _, ok := p.Annotations[remesherManagedLabel]; !ok {
+			logger.Infof("skipping peer %v: unmanaged due to missing label %q", p.Name, remesherManagedLabel)
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 		_, err := c.calicoClient.BGPPeers().Delete(ctx, p.Name, options.DeleteOptions{})
 		cancel()
@@ -283,9 +284,6 @@ func deltaPeers(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGP
 		toAdd = append(toAdd, d)
 	}
 	for _, c := range currMap {
-		if _, ok := c.Annotations[remesherManagedLabel]; !ok {
-			continue
-		}
 		toRemove = append(toRemove, c)
 	}
 	return toAdd, toRemove
@@ -294,7 +292,7 @@ func deltaPeers(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGP
 // buildPeer builds a BGPPeer using from as Node and to IP as PeerIP
 // creates a global bgpPEer if from is not set
 func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
-	//TODO: consider nodes with multiple addresses
+	//TODO: consider nodes with multiple addresses, maybe thru an annotation on the node?
 	var name, node string
 	if from != nil {
 		name = strings.ToLower(kubeNameRegex.ReplaceAllString(from.Name+"-"+to.Name, "-"))
@@ -306,10 +304,12 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "remesher-" + name,
 			Annotations: map[string]string{
-				remesherManagedLabel: "true",
+				remesherManagedLabel:  "true",
+				remesherPeerNodeLabel: to.Name,
 			},
 			Labels: map[string]string{
-				remesherManagedLabel: "true",
+				remesherManagedLabel:  "true",
+				remesherPeerNodeLabel: to.Name,
 			},
 		},
 		Spec: calicoapiv3.BGPPeerSpec{
@@ -327,33 +327,10 @@ func isGlobal(node *corev1.Node) bool {
 }
 
 // getCurrentBGPPeers returns all BGPPeers that refer to the node in calico (both ways)
-func (c *Controller) getCurrentBGPPeers(node *corev1.Node) ([]calicoapiv3.BGPPeer, error) {
+func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer, error) {
 	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
 	// perhaps using the Kubernetes API directly thru listers with caching instead of
 	// using the calico client (which means we would only support kubernetes backend)
-	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-	defer cancel()
-	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", node.Name, err)
-	}
-	var peers []calicoapiv3.BGPPeer
-	for _, p := range list.Items {
-		if p.Spec.Node == node.Name {
-			peers = append(peers, p)
-			continue
-		}
-		for _, addr := range node.Status.Addresses {
-			if p.Spec.PeerIP == addr.Address {
-				peers = append(peers, p)
-				break
-			}
-		}
-	}
-	return peers, nil
-}
-
-func (c *Controller) getCurrentBGPPeersByNodeName(nodeName string) ([]calicoapiv3.BGPPeer, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 	defer cancel()
 	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
@@ -362,8 +339,9 @@ func (c *Controller) getCurrentBGPPeersByNodeName(nodeName string) ([]calicoapiv
 	}
 	var peers []calicoapiv3.BGPPeer
 	for _, p := range list.Items {
-		if p.Spec.Node == nodeName {
+		if p.Spec.Node == nodeName || p.Annotations[remesherPeerNodeLabel] == nodeName {
 			peers = append(peers, p)
+			continue
 		}
 	}
 	return peers, nil
