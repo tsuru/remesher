@@ -303,7 +303,20 @@ func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) 
 		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
 		return nil, nil
 	}
-	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborhoodLabel: v}))
+	queries := map[string]string{
+		c.neighborhoodLabel: v,
+		masterLabel:         "true",
+		globalLabel:         "true",
+	}
+	var nodes []*corev1.Node
+	for k, v := range queries {
+		n, err := c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{k: v}))
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n...)
+	}
+	return nodes, nil
 }
 
 // buildMesh builds a BGPPeers Mesh from node to toNodes
