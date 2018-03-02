@@ -66,22 +66,6 @@ func Test_deltaPeers(t *testing.T) {
 	}
 }
 
-func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
-	peer := calicoapiv3.BGPPeer{
-		Spec: calicoapiv3.BGPPeerSpec{
-			Node:     node,
-			PeerIP:   peerIP,
-			ASNumber: asNumber,
-		},
-	}
-	if managed {
-		peer.ObjectMeta.Annotations = map[string]string{
-			remesherManagedLabel: "true",
-		}
-	}
-	return peer
-}
-
 func Test_buildPeer(t *testing.T) {
 	tests := []struct {
 		name string
@@ -91,14 +75,7 @@ func Test_buildPeer(t *testing.T) {
 	}{
 		{
 			name: "global",
-			to: &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "node1",
-				},
-				Status: corev1.NodeStatus{
-					Addresses: []corev1.NodeAddress{{Address: "192.168.10.1"}},
-				},
-			},
+			to:   newNode("node1", "192.168.10.1", nil),
 			want: calicoapiv3.BGPPeer{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "remesher-global-node1",
@@ -124,4 +101,220 @@ func Test_buildPeer(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func Test_buildMesh(t *testing.T) {
+	tests := []struct {
+		name    string
+		node    *corev1.Node
+		toNodes []*corev1.Node
+		want    []calicoapiv3.BGPPeer
+	}{
+
+		{
+			name: "master-global-without-neightbors",
+			node: newNode("node1", "192.168.10.1", map[string]string{masterLabel: "true"}),
+			want: []calicoapiv3.BGPPeer{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-global-node1",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						PeerIP:   "192.168.10.1",
+						ASNumber: asNumber,
+					},
+				},
+			},
+		},
+		{
+			name: "label-global-without-neightbors",
+			node: newNode("node1", "192.168.10.1", map[string]string{globalLabel: "true"}),
+			want: []calicoapiv3.BGPPeer{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-global-node1",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						PeerIP:   "192.168.10.1",
+						ASNumber: asNumber,
+					},
+				},
+			},
+		},
+		{
+			name:    "regular-with-neighbors",
+			node:    newNode("node1", "192.168.10.1", nil),
+			toNodes: []*corev1.Node{newNode("node2", "192.168.10.2", nil)},
+			want: []calicoapiv3.BGPPeer{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-node1-node2",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						Node:     "node1",
+						PeerIP:   "192.168.10.2",
+						ASNumber: asNumber,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-node2-node1",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						Node:     "node2",
+						PeerIP:   "192.168.10.1",
+						ASNumber: asNumber,
+					},
+				},
+			},
+		},
+		{
+			name:    "global-with-neighbors",
+			node:    newNode("node1", "192.168.10.1", map[string]string{masterLabel: "true"}),
+			toNodes: []*corev1.Node{newNode("node2", "192.168.10.2", nil)},
+			want: []calicoapiv3.BGPPeer{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-global-node1",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						PeerIP:   "192.168.10.1",
+						ASNumber: asNumber,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-node1-node2",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						Node:     "node1",
+						PeerIP:   "192.168.10.2",
+						ASNumber: asNumber,
+					},
+				},
+			},
+		},
+		{
+			name:    "with-global-neighbors",
+			node:    newNode("node1", "192.168.10.1", nil),
+			toNodes: []*corev1.Node{newNode("node2", "192.168.10.2", map[string]string{masterLabel: "true"})},
+			want: []calicoapiv3.BGPPeer{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-global-node2",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node2",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						PeerIP:   "192.168.10.2",
+						ASNumber: asNumber,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "remesher-node2-node1",
+						Annotations: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+						Labels: map[string]string{
+							"remesher.tsuru.io/managed":   "true",
+							"remesher.tsuru.io/peer-node": "node1",
+						},
+					},
+					Spec: calicoapiv3.BGPPeerSpec{
+						Node:     "node2",
+						PeerIP:   "192.168.10.1",
+						ASNumber: asNumber,
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildMesh(tt.node, tt.toNodes)
+			assert.ElementsMatch(t, tt.want, got)
+		})
+	}
+}
+
+func newNode(name, address string, labels map[string]string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: address}}},
+	}
+}
+
+func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
+	peer := calicoapiv3.BGPPeer{
+		Spec: calicoapiv3.BGPPeerSpec{
+			Node:     node,
+			PeerIP:   peerIP,
+			ASNumber: asNumber,
+		},
+	}
+	if managed {
+		peer.ObjectMeta.Annotations = map[string]string{
+			remesherManagedLabel: "true",
+		}
+	}
+	return peer
 }

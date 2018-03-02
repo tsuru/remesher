@@ -302,11 +302,14 @@ func buildMesh(node *corev1.Node, toNodes []*corev1.Node) []calicoapiv3.BGPPeer 
 		if node.Name == n.Name {
 			continue
 		}
-		peers = append(peers, buildPeer(node, n))
-		if isGlobal(node) {
-			continue
+		if !isGlobal(n) {
+			peers = append(peers, buildPeer(node, n))
+		} else {
+			peers = append(peers, buildPeer(nil, n))
 		}
-		peers = append(peers, buildPeer(n, node))
+		if !isGlobal(node) {
+			peers = append(peers, buildPeer(n, node))
+		}
 	}
 	return peers
 }
