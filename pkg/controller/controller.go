@@ -198,7 +198,7 @@ func (c *Controller) processItem(key string) error {
 		c.recorder.Eventf(node, corev1.EventTypeWarning, BGPPeersSyncFailed, "Error: %v", err)
 		return err
 	}
-	c.recorder.Event(node, corev1.EventTypeNormal, BGPPeersSyncSuccess, "BGPPeers synced sucessfully")
+	c.recorder.Event(node, corev1.EventTypeNormal, BGPPeersSyncSuccess, "BGPPeers synced successfully")
 	return nil
 }
 
