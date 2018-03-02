@@ -19,14 +19,14 @@ import (
 func main() {
 	stopCh := setupSignalHandler()
 	var (
-		masterURL      string
-		kubeconfig     string
-		neighborsLabel string
+		masterURL         string
+		kubeconfig        string
+		neighborhoodLabel string
 	)
 
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
-	flag.StringVar(&neighborsLabel, "neighbors-label", "", "The label to use when grouping nodes in the mesh.")
+	flag.StringVar(&neighborhoodLabel, "neighborhood-label", "", "The label to use when grouping nodes in the mesh.")
 	flag.Parse()
 
 	entry := logrus.NewEntry(logrus.New())
@@ -48,7 +48,7 @@ func main() {
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 
-	ctl := controller.NewController(kubeClient, kubeInformerFactory, entry, neighborsLabel, calicoClient)
+	ctl := controller.NewController(kubeClient, kubeInformerFactory, entry, neighborhoodLabel, calicoClient)
 
 	go kubeInformerFactory.Start(stopCh)
 

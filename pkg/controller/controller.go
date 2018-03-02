@@ -55,7 +55,7 @@ type Controller struct {
 
 	logger *logrus.Entry
 
-	neighborsLabel string
+	neighborhoodLabel string
 
 	//TODO: extract this to another pkg and require a minimal interface here
 	calicoClient calicoclientv3.Interface
@@ -76,14 +76,14 @@ func NewController(kubeclientset kubernetes.Interface,
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeclientset.CoreV1().Events("")})
 
 	controller := &Controller{
-		kubeclientset:  kubeclientset,
-		nodesInformer:  nodeInformer,
-		nodesSynced:    nodeInformer.Informer().HasSynced,
-		workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
-		recorder:       eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName}),
-		logger:         logger,
-		neighborsLabel: label,
-		calicoClient:   calicoClient,
+		kubeclientset:     kubeclientset,
+		nodesInformer:     nodeInformer,
+		nodesSynced:       nodeInformer.Informer().HasSynced,
+		workqueue:         workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		recorder:          eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName}),
+		logger:            logger,
+		neighborhoodLabel: label,
+		calicoClient:      calicoClient,
 	}
 
 	logrus.Info("Setting up event handlers")
@@ -283,13 +283,13 @@ func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer,
 }
 
 func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
-	v, ok := node.Labels[c.neighborsLabel]
+	v, ok := node.Labels[c.neighborhoodLabel]
 	if !ok {
-		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborsLabel)
+		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborhoodLabel)
 		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
 		return nil, nil
 	}
-	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborsLabel: v}))
+	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborhoodLabel: v}))
 }
 
 // buildMesh builds a BGPPeers Mesh from node to toNodes
