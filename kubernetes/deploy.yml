@@ -25,7 +25,7 @@ spec:
           name: remesher
           command: ["./remesher"]
           args:
-            - --neighbors-label
+            - --neighborhood-label
             - "tsuru.io/pool"
           env:
             # Use Kubernetes API as the calico backing datastore.
