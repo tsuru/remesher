@@ -27,6 +27,10 @@ spec:
           args:
             - --neighborhood-label
             - "tsuru.io/pool"
+            - --num-workers
+            - "2"
+            - --log-level
+            - info
           env:
             # Use Kubernetes API as the calico backing datastore.
             - name: DATASTORE_TYPE
