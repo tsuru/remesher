@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/labels"
-
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
@@ -18,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeinformers "k8s.io/client-go/informers"
@@ -94,18 +93,21 @@ func NewController(kubeclientset kubernetes.Interface,
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
 				controller.workqueue.Add(key)
+				controller.logger.WithField("op", "add").Infof("added %s to workqueue", key)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			if err == nil {
 				controller.workqueue.Add(key)
+				controller.logger.WithField("op", "delete").Infof("added %s to workqueue", key)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
 				controller.workqueue.Add(key)
+				controller.logger.WithField("op", "update").Infof("added %s to workqueue", key)
 			}
 		},
 	})
@@ -178,39 +180,39 @@ func (c *Controller) processItem(key string) error {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
 		return nil
 	}
+	logger := c.logger.WithField("node", name)
 
 	node, err := c.nodesInformer.Lister().Get(name)
 	if err != nil {
 		if kubeerrors.IsNotFound(err) {
-			return c.removeNode(name)
+			return c.removeNode(name, logger)
 		}
 		return err
 	}
 
-	return c.addNode(node)
+	return c.addNode(node, logger)
 }
 
-func (c *Controller) addNode(node *corev1.Node) error {
-	logger := c.logger.WithField("node", node.Name)
+func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) error {
 	logger.Info("handling add operation")
+
+	neightbors, err := c.getBGPNeighbors(node)
+	if err != nil {
+		return fmt.Errorf("failed to get node neighbors: %v", err)
+	}
+	expectedPeers := buildMesh(node, neightbors)
+
 	currPeers, err := c.getCurrentBGPPeers(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
-	var expectedPeers []calicoapiv3.BGPPeer
-	if isGlobal(node) {
-		logger.Infof("should be added as global peer")
-		expectedPeers = append(expectedPeers, buildPeer(nil, node))
-	} else {
-		neightbors, err := c.getBGPNeighbors(node)
-		if err != nil {
-			return fmt.Errorf("failed to get node neighbors: %v", err)
-		}
-		expectedPeers = c.buildMesh(node, neightbors)
-	}
-	logger.Infof("current peers: %+#v - expected peers: %+#v", currPeers, expectedPeers)
-	toAdd, toRemove := deltaPeers(currPeers, expectedPeers)
-	logger.Infof("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
+	return c.reconcile(currPeers, expectedPeers, logger)
+}
+
+func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *logrus.Entry) error {
+	logger.Debugf("current peers: %+#v - expected peers: %+#v", current, desired)
+	toAdd, toRemove := deltaPeers(current, desired)
+	logger.Debugf("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
 
 	for _, p := range toAdd {
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
@@ -229,8 +231,7 @@ func (c *Controller) addNode(node *corev1.Node) error {
 	return c.removePeers(toRemove, logger)
 }
 
-func (c *Controller) removeNode(name string) error {
-	logger := c.logger.WithField("node", name)
+func (c *Controller) removeNode(name string, logger *logrus.Entry) error {
 	logger.Info("handling remove operation")
 	currPeers, err := c.getCurrentBGPPeers(name)
 	if err != nil {
@@ -260,13 +261,52 @@ func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 	return nil
 }
 
-func (c *Controller) buildMesh(node *corev1.Node, toNodes []*corev1.Node) []calicoapiv3.BGPPeer {
+// getCurrentBGPPeers returns all BGPPeers that refer to the node in calico (both ways)
+func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer, error) {
+	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
+	// perhaps using the Kubernetes API directly thru listers with caching instead of
+	// using the calico client (which means we would only support kubernetes backend)
+	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
+	defer cancel()
+	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", nodeName, err)
+	}
 	var peers []calicoapiv3.BGPPeer
+	for _, p := range list.Items {
+		if p.Spec.Node == nodeName || p.Annotations[remesherPeerNodeLabel] == nodeName {
+			peers = append(peers, p)
+			continue
+		}
+	}
+	return peers, nil
+}
+
+func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
+	v, ok := node.Labels[c.neighborsLabel]
+	if !ok {
+		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborsLabel)
+		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
+		return nil, nil
+	}
+	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborsLabel: v}))
+}
+
+// buildMesh builds a BGPPeers Mesh from node to toNodes
+func buildMesh(node *corev1.Node, toNodes []*corev1.Node) []calicoapiv3.BGPPeer {
+	var peers []calicoapiv3.BGPPeer
+	if isGlobal(node) {
+		peers = append(peers, buildPeer(nil, node))
+	}
 	for _, n := range toNodes {
 		if node.Name == n.Name {
 			continue
 		}
-		peers = append(peers, buildPeer(node, n), buildPeer(n, node))
+		peers = append(peers, buildPeer(node, n))
+		if isGlobal(node) {
+			continue
+		}
+		peers = append(peers, buildPeer(n, node))
 	}
 	return peers
 }
@@ -324,35 +364,4 @@ func isGlobal(node *corev1.Node) bool {
 	_, master := node.Labels[masterLabel]
 	_, global := node.Labels[globalLabel]
 	return master || global
-}
-
-// getCurrentBGPPeers returns all BGPPeers that refer to the node in calico (both ways)
-func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer, error) {
-	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
-	// perhaps using the Kubernetes API directly thru listers with caching instead of
-	// using the calico client (which means we would only support kubernetes backend)
-	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-	defer cancel()
-	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", nodeName, err)
-	}
-	var peers []calicoapiv3.BGPPeer
-	for _, p := range list.Items {
-		if p.Spec.Node == nodeName || p.Annotations[remesherPeerNodeLabel] == nodeName {
-			peers = append(peers, p)
-			continue
-		}
-	}
-	return peers, nil
-}
-
-func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
-	v, ok := node.Labels[c.neighborsLabel]
-	if !ok {
-		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborsLabel)
-		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
-		return nil, nil
-	}
-	return c.nodesInformer.Lister().List(labels.SelectorFromSet(map[string]string{c.neighborsLabel: v}))
 }
