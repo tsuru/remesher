@@ -202,7 +202,7 @@ func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) error {
 	}
 	expectedPeers := buildMesh(node, neightbors)
 
-	currPeers, err := c.getCurrentBGPPeers(node.Name)
+	currPeers, err := c.getCurrentBGPPeers(node.Name, true)
 	if err != nil {
 		return fmt.Errorf("failed to get current peers: %v", err)
 	}
@@ -233,7 +233,7 @@ func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *l
 
 func (c *Controller) removeNode(name string, logger *logrus.Entry) error {
 	logger.Info("handling remove operation")
-	currPeers, err := c.getCurrentBGPPeers(name)
+	currPeers, err := c.getCurrentBGPPeers(name, false)
 	if err != nil {
 		return err
 	}
@@ -261,8 +261,8 @@ func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 	return nil
 }
 
-// getCurrentBGPPeers returns all BGPPeers that refer to the node in calico (both ways)
-func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer, error) {
+// getCurrentBGPPeers returns all BGPPeers that directly refer the node in calico (both ways)
+func (c *Controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool) ([]calicoapiv3.BGPPeer, error) {
 	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
 	// perhaps using the Kubernetes API directly thru listers with caching instead of
 	// using the calico client (which means we would only support kubernetes backend)
@@ -274,9 +274,11 @@ func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer,
 	}
 	var peers []calicoapiv3.BGPPeer
 	for _, p := range list.Items {
-		if p.Spec.Node == nodeName || p.Annotations[remesherPeerNodeLabel] == nodeName {
+		if (includeAllGlobals && p.Spec.Node == "") || p.Annotations[remesherPeerNodeLabel] == nodeName {
 			peers = append(peers, p)
-			continue
+		}
+		if p.Spec.Node == nodeName {
+			peers = append(peers, p)
 		}
 	}
 	return peers, nil
