@@ -38,6 +38,9 @@ const (
 	remesherManagedLabel  = "remesher.tsuru.io/managed"
 	remesherPeerNodeLabel = "remesher.tsuru.io/peer-node"
 	calicoTimeout         = time.Second * 5
+
+	BGPPeersSyncFailed  = "BGPPeersSyncFailed"
+	BGPPeersSyncSuccess = "BGPPeersSyncSuccess"
 )
 
 var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
@@ -190,7 +193,13 @@ func (c *Controller) processItem(key string) error {
 		return err
 	}
 
-	return c.addNode(node, logger)
+	err = c.addNode(node, logger)
+	if err != nil {
+		c.recorder.Eventf(node, corev1.EventTypeWarning, BGPPeersSyncFailed, "Error: %v", err)
+		return err
+	}
+	c.recorder.Event(node, corev1.EventTypeNormal, BGPPeersSyncSuccess, "BGPPeers synced sucessfully")
+	return nil
 }
 
 func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) error {
