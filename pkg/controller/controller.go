@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/client"
 	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
@@ -188,41 +190,46 @@ func (c *Controller) processItem(key string) error {
 	node, err := c.nodesInformer.Lister().Get(name)
 	if err != nil {
 		if kubeerrors.IsNotFound(err) {
-			return c.removeNode(name, logger)
+			_, errRem := c.removeNode(name, logger)
+			return errRem
 		}
 		return err
 	}
 
-	err = c.addNode(node, logger)
+	changed, err := c.addNode(node, logger)
 	if err != nil {
 		c.recorder.Eventf(node, corev1.EventTypeWarning, BGPPeersSyncFailed, "Error: %v", err)
 		return err
 	}
-	c.recorder.Event(node, corev1.EventTypeNormal, BGPPeersSyncSuccess, "BGPPeers synced successfully")
+	if changed > 0 {
+		c.recorder.Event(node, corev1.EventTypeNormal, BGPPeersSyncSuccess, "BGPPeers synced successfully")
+	}
 	return nil
 }
 
-func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) error {
+func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) (int, error) {
 	logger.Info("handling add operation")
 
 	neightbors, err := c.getBGPNeighbors(node)
 	if err != nil {
-		return fmt.Errorf("failed to get node neighbors: %v", err)
+		return 0, fmt.Errorf("failed to get node neighbors: %v", err)
 	}
 	expectedPeers := buildMesh(node, neightbors)
 
 	currPeers, err := c.getCurrentBGPPeers(node.Name, true)
 	if err != nil {
-		return fmt.Errorf("failed to get current peers: %v", err)
+		return 0, fmt.Errorf("failed to get current peers: %v", err)
 	}
 	return c.reconcile(currPeers, expectedPeers, logger)
 }
 
-func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *logrus.Entry) error {
+func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
 	logger.Debugf("current peers: %+#v - expected peers: %+#v", current, desired)
 	toAdd, toRemove := deltaPeers(current, desired)
 	logger.Debugf("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
 
+	var errors *multierror.Error
+	var added int
 	for _, p := range toAdd {
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 		_, err := c.calicoClient.BGPPeers().Create(ctx, &p, options.SetOptions{})
@@ -232,24 +239,28 @@ func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *l
 				logger.Infof("ignoring error creating bgpPeer %v: %v", p.Name, err)
 				continue
 			}
-			// TODO: add to multierror and return the multierror
-			logger.Errorf("failed to create bgpPeer %v: %v", p, err)
+			errors = multierror.Append(errors, err)
+			continue
 		}
+		added++
 	}
-
-	return c.removePeers(toRemove, logger)
+	removed, err := c.removePeers(toRemove, logger)
+	errors = multierror.Append(errors, err)
+	return removed + added, errors.ErrorOrNil()
 }
 
-func (c *Controller) removeNode(name string, logger *logrus.Entry) error {
+func (c *Controller) removeNode(name string, logger *logrus.Entry) (int, error) {
 	logger.Info("handling remove operation")
 	currPeers, err := c.getCurrentBGPPeers(name, false)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	return c.removePeers(currPeers, logger)
 }
 
-func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) error {
+func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
+	var errors *multierror.Error
+	var removed int
 	for _, p := range peers {
 		if _, ok := p.Annotations[remesherManagedLabel]; !ok {
 			logger.Infof("skipping peer %v: unmanaged due to missing label %q", p.Name, remesherManagedLabel)
@@ -263,11 +274,12 @@ func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 				logger.Infof("ignoring error deleting bgpPeer %v: %v", p.Name, err)
 				continue
 			}
-			// TODO: add to multierror and return the multierror
-			logger.Errorf("failed to remove bgpPeer %v: %v", p.Name, err)
+			errors = multierror.Append(errors, err)
+			continue
 		}
+		removed++
 	}
-	return nil
+	return removed, errors.ErrorOrNil()
 }
 
 // getCurrentBGPPeers returns all BGPPeers that directly refer the node in calico (both ways)
