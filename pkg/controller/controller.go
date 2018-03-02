@@ -283,6 +283,9 @@ func (c *Controller) getCurrentBGPPeers(nodeName string) ([]calicoapiv3.BGPPeer,
 }
 
 func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
+	if isGlobal(node) {
+		return c.nodesInformer.Lister().List(nil)
+	}
 	v, ok := node.Labels[c.neighborhoodLabel]
 	if !ok {
 		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborhoodLabel)
