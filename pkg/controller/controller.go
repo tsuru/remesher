@@ -77,26 +77,28 @@ type controller struct {
 }
 
 type Config struct {
-	CalicoClient        calicoclientv3.Interface
-	KubeClient          kubernetes.Interface
-	Logger              *logrus.Entry
-	Namespace           string
-	KubeInformerFactory kubeinformers.SharedInformerFactory
-	NumWorkers          int
-	NeighborhoodLabel   string
-	MetricsRegisterer   prometheus.Registerer
+	CalicoClient      calicoclientv3.Interface
+	KubeClient        kubernetes.Interface
+	Logger            *logrus.Entry
+	Namespace         string
+	NumWorkers        int
+	NeighborhoodLabel string
+	MetricsRegisterer prometheus.Registerer
 }
 
-func Start(c Config) error {
+func Start(c Config, stopCh <-chan struct{}) error {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(c.Logger.Infof)
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events(c.Namespace)})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
+	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, time.Second*30)
+	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
+	go kubeInformerFactory.Start(stopCh)
 	run := func(stopCh <-chan struct{}) {
 		ctl := newController(
 			c.KubeClient,
-			c.KubeInformerFactory,
+			nodeInformer,
 			recorder,
 			c.Logger,
 			c.NeighborhoodLabel,
@@ -141,14 +143,12 @@ func Start(c Config) error {
 
 // NewController returns a new controller
 func newController(kubeclientset kubernetes.Interface,
-	kubeInformerFactory kubeinformers.SharedInformerFactory,
+	nodeInformer coreinformers.NodeInformer,
 	recorder record.EventRecorder,
 	logger *logrus.Entry,
 	label string,
 	calicoClient calicoclientv3.Interface,
 	metricsRegistry prometheus.Registerer) *controller {
-
-	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 
 	controller := &controller{
 		kubeclientset:     kubeclientset,

@@ -19,8 +19,6 @@ import (
 	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/sirupsen/logrus"
 	"github.com/tsuru/remesher/pkg/controller"
-
-	kubeinformers "k8s.io/client-go/informers"
 )
 
 func main() {
@@ -60,19 +58,16 @@ func main() {
 		log.Fatalf("Error creating calico client: %v", err)
 	}
 
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
-	go kubeInformerFactory.Start(stopCh)
 	go servePrometheusMetrics(port, stopCh, log)
 	controller.Start(controller.Config{
-		KubeClient:          kubeClient,
-		CalicoClient:        calicoClient,
-		Logger:              logrus.NewEntry(log),
-		Namespace:           namespace,
-		KubeInformerFactory: kubeInformerFactory,
-		NeighborhoodLabel:   neighborhoodLabel,
-		NumWorkers:          numWorkers,
-		MetricsRegisterer:   prometheus.DefaultRegisterer,
-	})
+		KubeClient:        kubeClient,
+		CalicoClient:      calicoClient,
+		Logger:            logrus.NewEntry(log),
+		Namespace:         namespace,
+		NeighborhoodLabel: neighborhoodLabel,
+		NumWorkers:        numWorkers,
+		MetricsRegisterer: prometheus.DefaultRegisterer,
+	}, stopCh)
 }
 
 func setupSignalHandler() (stopCh <-chan struct{}) {
