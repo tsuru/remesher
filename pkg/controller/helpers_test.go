@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func Test_deltaPeers(t *testing.T) {
+func Test_diff(t *testing.T) {
 	tests := []struct {
 		name         string
 		current      []calicoapiv3.BGPPeer
@@ -59,7 +59,7 @@ func Test_deltaPeers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotToAdd, gotToRemove := deltaPeers(tt.current, tt.desired)
+			gotToAdd, gotToRemove := diff(tt.current, tt.desired)
 			assert.ElementsMatch(t, tt.wantToAdd, gotToAdd)
 			assert.ElementsMatch(t, tt.wantToRemove, gotToRemove)
 		})
