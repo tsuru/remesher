@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"regexp"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -27,6 +30,8 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -49,8 +54,7 @@ var (
 	kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
 )
 
-// Controller is a controller that watches for node changes and updates BGPPeers resources
-type Controller struct {
+type controller struct {
 	kubeclientset kubernetes.Interface
 
 	nodesInformer coreinformers.NodeInformer
@@ -73,27 +77,86 @@ type Controller struct {
 	workqueueLen      prometheus.GaugeFunc
 }
 
+type Config struct {
+	CalicoClient        calicoclientv3.Interface
+	KubeClient          kubernetes.Interface
+	Logger              *logrus.Entry
+	Namespace           string
+	KubeInformerFactory kubeinformers.SharedInformerFactory
+	NumWorkers          int
+	NeighborhoodLabel   string
+	MetricsRegisterer   prometheus.Registerer
+}
+
+func Start(c Config) error {
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(c.Logger.Infof)
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events(c.Namespace)})
+	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
+
+	run := func(stopCh <-chan struct{}) {
+		ctl := newController(
+			c.KubeClient,
+			c.KubeInformerFactory,
+			recorder,
+			c.Logger,
+			c.NeighborhoodLabel,
+			c.CalicoClient,
+			c.MetricsRegisterer,
+		)
+		if err := ctl.Run(c.NumWorkers, stopCh); err != nil {
+			c.Logger.WithError(err).Warn("failure running controller")
+		}
+	}
+
+	id, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("failed to get hostname: %v", err)
+	}
+
+	rl := resourcelock.EndpointsLock{
+		EndpointsMeta: metav1.ObjectMeta{
+			Namespace: c.Namespace,
+			Name:      controllerAgentName,
+		},
+		Client: c.KubeClient.CoreV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity:      id + "-remesher",
+			EventRecorder: recorder,
+		},
+	}
+	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
+		Lock:          &rl,
+		LeaseDuration: time.Second * 60,
+		RenewDeadline: time.Second * 30,
+		RetryPeriod:   time.Second * 10,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: run,
+			OnStoppedLeading: func() {
+				log.Fatalf("leaderelection lost")
+			},
+		},
+	})
+	return nil
+}
+
 // NewController returns a new controller
-func NewController(kubeclientset kubernetes.Interface,
+func newController(kubeclientset kubernetes.Interface,
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
+	recorder record.EventRecorder,
 	logger *logrus.Entry,
 	label string,
 	calicoClient calicoclientv3.Interface,
-	metricsRegistry prometheus.Registerer) *Controller {
+	metricsRegistry prometheus.Registerer) *controller {
 
 	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 
-	logger.Info("Creating event broadcaster")
-	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(logger.Infof)
-	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeclientset.CoreV1().Events("")})
-
-	controller := &Controller{
+	controller := &controller{
 		kubeclientset:     kubeclientset,
 		nodesInformer:     nodeInformer,
 		nodesSynced:       nodeInformer.Informer().HasSynced,
 		workqueue:         workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
-		recorder:          eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName}),
+		recorder:          recorder,
 		logger:            logger,
 		neighborhoodLabel: label,
 		calicoClient:      calicoClient,
@@ -150,7 +213,7 @@ func NewController(kubeclientset kubernetes.Interface,
 }
 
 // Run runs the controller which starts workers to process the work queue
-func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
+func (c *controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer c.workqueue.ShutDown()
 	defer c.shutdown()
@@ -172,7 +235,7 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	return nil
 }
 
-func (c *Controller) shutdown() {
+func (c *controller) shutdown() {
 	c.logger.Info("Shutting down prometheus collectors")
 	c.metricsRegisterer.Unregister(c.workqueueLen)
 	c.metricsRegisterer.Unregister(c.workqueueDuration)
@@ -182,14 +245,14 @@ func (c *Controller) shutdown() {
 // runWorker is a long-running function that will continually call the
 // processNextWorkItem function in order to read and process a message on the
 // workqueue.
-func (c *Controller) runWorker() {
+func (c *controller) runWorker() {
 	for c.processNextItem() {
 	}
 }
 
 // processNextWorkItem deals with one key off the queue.  It returns false
 // when it's time to quit.
-func (c *Controller) processNextItem() bool {
+func (c *controller) processNextItem() bool {
 	key, quit := c.workqueue.Get()
 	if quit {
 		return false
@@ -217,7 +280,7 @@ func (c *Controller) processNextItem() bool {
 	return true
 }
 
-func (c *Controller) processItem(key string) error {
+func (c *controller) processItem(key string) error {
 	_, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("invalid resource key: %s", key))
@@ -245,7 +308,7 @@ func (c *Controller) processItem(key string) error {
 	return nil
 }
 
-func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) (int, error) {
+func (c *controller) addNode(node *corev1.Node, logger *logrus.Entry) (int, error) {
 	logger.Info("handling add operation")
 
 	neightbors, err := c.getBGPNeighbors(node)
@@ -261,7 +324,7 @@ func (c *Controller) addNode(node *corev1.Node, logger *logrus.Entry) (int, erro
 	return c.reconcile(currPeers, expectedPeers, logger)
 }
 
-func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
+func (c *controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
 	logger.Debugf("current peers: %+#v - expected peers: %+#v", current, desired)
 	toAdd, toRemove := diff(current, desired)
 	logger.Debugf("toAdd: %+#v - toRemove: %+#v", toAdd, toRemove)
@@ -287,7 +350,7 @@ func (c *Controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *l
 	return removed + added, errors.ErrorOrNil()
 }
 
-func (c *Controller) removeNode(name string, logger *logrus.Entry) (int, error) {
+func (c *controller) removeNode(name string, logger *logrus.Entry) (int, error) {
 	logger.Info("handling remove operation")
 	currPeers, err := c.getCurrentBGPPeers(name, false)
 	if err != nil {
@@ -296,7 +359,7 @@ func (c *Controller) removeNode(name string, logger *logrus.Entry) (int, error) 
 	return c.removePeers(currPeers, logger)
 }
 
-func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
+func (c *controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Entry) (int, error) {
 	var errors *multierror.Error
 	var removed int
 	for _, p := range peers {
@@ -321,7 +384,7 @@ func (c *Controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 }
 
 // getCurrentBGPPeers returns all BGPPeers that directly refer the node in calico (both ways)
-func (c *Controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool) ([]calicoapiv3.BGPPeer, error) {
+func (c *controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool) ([]calicoapiv3.BGPPeer, error) {
 	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
 	// perhaps using the Kubernetes API directly thru listers with caching instead of
 	// using the calico client (which means we would only support kubernetes backend)
@@ -343,7 +406,7 @@ func (c *Controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool)
 	return peers, nil
 }
 
-func (c *Controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
+func (c *controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) {
 	if isGlobal(node) {
 		return c.nodesInformer.Lister().List(labels.Everything())
 	}

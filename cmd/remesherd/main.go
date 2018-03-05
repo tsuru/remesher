@@ -10,17 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tsuru/remesher/pkg/k8s"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/prometheus/client_golang/prometheus"
-
+	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/sirupsen/logrus"
 	"github.com/tsuru/remesher/pkg/controller"
 
-	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
 	kubeinformers "k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 func main() {
@@ -32,14 +30,16 @@ func main() {
 		numWorkers        int
 		logLevel          string
 		port              string
+		namespace         string
 	)
-
+	//TODO: consider using viper for this
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&neighborhoodLabel, "neighborhood-label", "", "The label to use when grouping nodes in the mesh.")
 	flag.IntVar(&numWorkers, "num-workers", 1, "The number of workers processing the work queue.")
 	flag.StringVar(&logLevel, "log-level", "info", "The log level.")
 	flag.StringVar(&port, "metrics-port", "8081", "Metrics port to listen on.")
+	flag.StringVar(&namespace, "namespace", "kube-system", "Namespace used to create resources.")
 	flag.Parse()
 
 	log := logrus.New()
@@ -49,38 +49,27 @@ func main() {
 	}
 	log.SetLevel(level)
 
-	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
+	kubeClient, err := k8s.NewClientset(masterURL, kubeconfig)
 	if err != nil {
-		log.Fatalf("Error building kubeconfig: %s", err.Error())
+		log.Fatalf("Error creating kubernetes client: %v", err)
 	}
-
-	kubeClient, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		log.Fatalf("Error building kubernetes clientset: %s", err.Error())
-	}
-
 	calicoClient, err := calicoclientv3.NewFromEnv()
 	if err != nil {
-		log.Fatalf("Error building calico client: %s", err.Error())
+		log.Fatalf("Error creating calico client: %v", err)
 	}
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
-
-	ctl := controller.NewController(
-		kubeClient,
-		kubeInformerFactory,
-		logrus.NewEntry(log),
-		neighborhoodLabel,
-		calicoClient,
-		prometheus.DefaultRegisterer,
-	)
-
 	go kubeInformerFactory.Start(stopCh)
 	go servePrometheusMetrics(port, stopCh, log)
-
-	if err = ctl.Run(numWorkers, stopCh); err != nil {
-		log.Fatalf("Error running controller: %s", err.Error())
-	}
+	controller.Start(controller.Config{
+		KubeClient:          kubeClient,
+		CalicoClient:        calicoClient,
+		Logger:              logrus.NewEntry(log),
+		Namespace:           namespace,
+		KubeInformerFactory: kubeInformerFactory,
+		NeighborhoodLabel:   neighborhoodLabel,
+		NumWorkers:          numWorkers,
+	})
 }
 
 func setupSignalHandler() (stopCh <-chan struct{}) {
