@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"time"
@@ -133,7 +132,7 @@ func Start(c Config) error {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: run,
 			OnStoppedLeading: func() {
-				log.Fatalf("leaderelection lost")
+				c.Logger.Info("leaderelection lost")
 			},
 		},
 	})
