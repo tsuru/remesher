@@ -93,9 +93,8 @@ func Start(c Config, stopCh <-chan struct{}) error {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, time.Second*30)
-	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
-	go kubeInformerFactory.Start(stopCh)
 	run := func(stopCh <-chan struct{}) {
+		nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 		ctl := newController(
 			c.KubeClient,
 			nodeInformer,
@@ -105,6 +104,8 @@ func Start(c Config, stopCh <-chan struct{}) error {
 			c.CalicoClient,
 			c.MetricsRegisterer,
 		)
+		// this needs to be done after a call to nodeInformer.Informer()
+		go kubeInformerFactory.Start(stopCh)
 		if err := ctl.Run(c.NumWorkers, stopCh); err != nil {
 			c.Logger.WithError(err).Warn("failure running controller")
 		}
