@@ -67,8 +67,10 @@ type Controller struct {
 	//TODO: extract this to another pkg and require a minimal interface here
 	calicoClient calicoclientv3.Interface
 
+	metricsRegisterer prometheus.Registerer
 	errorsCounter     prometheus.Counter
 	workqueueDuration prometheus.Histogram
+	workqueueLen      prometheus.GaugeFunc
 }
 
 // NewController returns a new controller
@@ -123,6 +125,7 @@ func NewController(kubeclientset kubernetes.Interface,
 	})
 
 	logger.Info("Registering Prometheus metrics")
+	controller.metricsRegisterer = metricsRegistry
 	controller.workqueueDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Name: "remesher_controller_process_duration",
@@ -135,12 +138,13 @@ func NewController(kubeclientset kubernetes.Interface,
 			Help: "The total number of errors processing items.",
 		},
 	)
-	metricsRegistry.MustRegister(controller.workqueueDuration, controller.errorsCounter, prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+	controller.workqueueLen = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "remesher_controller_workqueue_current_items",
 		Help: "The current count of items on the workqueue.",
 	}, func() float64 {
 		return float64(controller.workqueue.Len())
-	}))
+	})
+	controller.metricsRegisterer.MustRegister(controller.workqueueDuration, controller.errorsCounter, controller.workqueueLen)
 
 	return controller
 }
@@ -149,6 +153,7 @@ func NewController(kubeclientset kubernetes.Interface,
 func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer c.workqueue.ShutDown()
+	defer c.shutdown()
 
 	c.logger.Info("Waiting for informer caches to sync")
 	if ok := cache.WaitForCacheSync(stopCh, c.nodesSynced); !ok {
@@ -165,6 +170,13 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	c.logger.Info("Shutting down workers")
 
 	return nil
+}
+
+func (c *Controller) shutdown() {
+	c.logger.Info("Shutting down prometheus collectors")
+	c.metricsRegisterer.Unregister(c.workqueueLen)
+	c.metricsRegisterer.Unregister(c.workqueueDuration)
+	c.metricsRegisterer.Unregister(c.errorsCounter)
 }
 
 // runWorker is a long-running function that will continually call the
