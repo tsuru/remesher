@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tsuru/remesher/pkg/k8s"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -69,6 +71,7 @@ func main() {
 		KubeInformerFactory: kubeInformerFactory,
 		NeighborhoodLabel:   neighborhoodLabel,
 		NumWorkers:          numWorkers,
+		MetricsRegisterer:   prometheus.DefaultRegisterer,
 	})
 }
 
