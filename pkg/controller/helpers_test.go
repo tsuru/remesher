@@ -79,10 +79,6 @@ func Test_buildPeer(t *testing.T) {
 			want: calicoapiv3.BGPPeer{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "remesher-global-node1",
-					Annotations: map[string]string{
-						"remesher.tsuru.io/managed":   "true",
-						"remesher.tsuru.io/peer-node": "node1",
-					},
 					Labels: map[string]string{
 						"remesher.tsuru.io/managed":   "true",
 						"remesher.tsuru.io/peer-node": "node1",
@@ -118,10 +114,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-global-node1",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node1",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node1",
@@ -141,10 +133,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-global-node1",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node1",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node1",
@@ -165,10 +153,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-node1-node2",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node2",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node2",
@@ -183,10 +167,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-node2-node1",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node1",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node1",
@@ -208,10 +188,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-global-node1",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node1",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node1",
@@ -225,10 +201,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-node1-node2",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node2",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node2",
@@ -250,10 +222,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-global-node2",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node2",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node2",
@@ -267,10 +235,6 @@ func Test_buildMesh(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "remesher-node2-node1",
-						Annotations: map[string]string{
-							"remesher.tsuru.io/managed":   "true",
-							"remesher.tsuru.io/peer-node": "node1",
-						},
 						Labels: map[string]string{
 							"remesher.tsuru.io/managed":   "true",
 							"remesher.tsuru.io/peer-node": "node1",
@@ -312,7 +276,7 @@ func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
 		},
 	}
 	if managed {
-		peer.ObjectMeta.Annotations = map[string]string{
+		peer.ObjectMeta.Labels = map[string]string{
 			remesherManagedLabel: "true",
 		}
 	}

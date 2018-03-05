@@ -40,10 +40,6 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 	return calicoapiv3.BGPPeer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "remesher-" + name,
-			Annotations: map[string]string{
-				remesherManagedLabel:  "true",
-				remesherPeerNodeLabel: to.Name,
-			},
 			Labels: map[string]string{
 				remesherManagedLabel:  "true",
 				remesherPeerNodeLabel: to.Name,

@@ -362,7 +362,7 @@ func (c *controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 	var errors *multierror.Error
 	var removed int
 	for _, p := range peers {
-		if _, ok := p.Annotations[remesherManagedLabel]; !ok {
+		if _, ok := p.Labels[remesherManagedLabel]; !ok {
 			logger.Infof("skipping peer %v: unmanaged due to missing label %q", p.Name, remesherManagedLabel)
 			continue
 		}
