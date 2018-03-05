@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/hashicorp/go-multierror"
 
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
@@ -45,7 +47,9 @@ const (
 	BGPPeersSyncSuccess = "BGPPeersSyncSuccess"
 )
 
-var kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
+var (
+	kubeNameRegex = regexp.MustCompile(`(?i)[^a-z0-9.-]`)
+)
 
 // Controller is a controller that watches for node changes and updates BGPPeers resources
 type Controller struct {
@@ -64,6 +68,9 @@ type Controller struct {
 
 	//TODO: extract this to another pkg and require a minimal interface here
 	calicoClient calicoclientv3.Interface
+
+	errorsCounter     prometheus.Counter
+	workqueueDuration prometheus.Histogram
 }
 
 // NewController returns a new controller
@@ -71,7 +78,8 @@ func NewController(kubeclientset kubernetes.Interface,
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
 	logger *logrus.Entry,
 	label string,
-	calicoClient calicoclientv3.Interface) *Controller {
+	calicoClient calicoclientv3.Interface,
+	metricsRegistry prometheus.Registerer) *Controller {
 
 	nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 
@@ -116,6 +124,28 @@ func NewController(kubeclientset kubernetes.Interface,
 			}
 		},
 	})
+
+	metricsRegistry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "remesher_controller_workqueue_current_items",
+		Help: "The current count of items on the workqueue.",
+	}, func() float64 {
+		return float64(controller.workqueue.Len())
+	}))
+
+	controller.workqueueDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name: "remesher_controller_process_duration",
+			Help: "The duration of the item processing in seconds.",
+		},
+	)
+
+	controller.errorsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "remesher_controller_errors_total",
+			Help: "The total number of errors processing items.",
+		},
+	)
+	metricsRegistry.MustRegister(controller.workqueueDuration, controller.errorsCounter)
 
 	return controller
 }
@@ -163,14 +193,18 @@ func (c *Controller) processNextItem() bool {
 
 	defer c.workqueue.Done(key)
 
+	now := time.Now()
 	err := c.processItem(key.(string))
+	c.workqueueDuration.Observe(time.Since(now).Seconds())
 
 	if err == nil {
 		c.workqueue.Forget(key)
 	} else if c.workqueue.NumRequeues(key) < maxRetries {
+		c.errorsCounter.Inc()
 		c.logger.Errorf("Error processing %s (will retry): %v", key, err)
 		c.workqueue.AddRateLimited(key)
 	} else {
+		c.errorsCounter.Inc()
 		c.logger.Errorf("Error processing %s (giving up): %v", key, err)
 		c.workqueue.Forget(key)
 		utilruntime.HandleError(err)
