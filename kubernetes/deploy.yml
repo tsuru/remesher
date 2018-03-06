@@ -31,6 +31,8 @@ spec:
             - "2"
             - --log-level
             - info
+            - --namespace
+            - "kube-system"
           env:
             # Use Kubernetes API as the calico backing datastore.
             - name: DATASTORE_TYPE
@@ -64,6 +66,13 @@ rules:
     verbs:
       - create
       - patch
+  - apiGroups: [""]
+    resources:
+      - endpoints
+    verbs:
+      - create
+      - update
+      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
