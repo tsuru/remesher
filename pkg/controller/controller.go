@@ -77,13 +77,14 @@ type controller struct {
 }
 
 type Config struct {
-	CalicoClient      calicoclientv3.Interface
-	KubeClient        kubernetes.Interface
-	Logger            *logrus.Entry
-	Namespace         string
-	NumWorkers        int
-	NeighborhoodLabel string
-	MetricsRegisterer prometheus.Registerer
+	CalicoClient         calicoclientv3.Interface
+	KubeClient           kubernetes.Interface
+	Logger               *logrus.Entry
+	Namespace            string
+	NumWorkers           int
+	NeighborhoodLabel    string
+	MetricsRegisterer    prometheus.Registerer
+	LeaderElectionConfig leaderelection.LeaderElectionConfig
 }
 
 func Start(c Config, stopCh <-chan struct{}) error {
@@ -115,8 +116,7 @@ func Start(c Config, stopCh <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get hostname: %v", err)
 	}
-
-	rl := resourcelock.EndpointsLock{
+	c.LeaderElectionConfig.Lock = &resourcelock.EndpointsLock{
 		EndpointsMeta: metav1.ObjectMeta{
 			Namespace: c.Namespace,
 			Name:      controllerAgentName,
@@ -127,18 +127,13 @@ func Start(c Config, stopCh <-chan struct{}) error {
 			EventRecorder: recorder,
 		},
 	}
-	leaderelection.RunOrDie(leaderelection.LeaderElectionConfig{
-		Lock:          &rl,
-		LeaseDuration: time.Second * 60,
-		RenewDeadline: time.Second * 30,
-		RetryPeriod:   time.Second * 10,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: run,
-			OnStoppedLeading: func() {
-				c.Logger.Info("leaderelection lost")
-			},
+	c.LeaderElectionConfig.Callbacks = leaderelection.LeaderCallbacks{
+		OnStartedLeading: run,
+		OnStoppedLeading: func() {
+			c.Logger.Info("leaderelection lost")
 		},
-	})
+	}
+	leaderelection.RunOrDie(c.LeaderElectionConfig)
 	return nil
 }
 
