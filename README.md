@@ -7,7 +7,7 @@ construct a customized, segregated Node to Node BGP mesh based on the node's lab
 
 ## How it Works
 
-![Diagram](https://raw.githubusercontent.com/tsuru/remesher/master/remesher.svg)
+![Diagram](https://raw.githubusercontent.com/tsuru/remesher/master/remesher.png)
 
 
 
