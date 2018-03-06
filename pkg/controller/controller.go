@@ -45,7 +45,10 @@ const (
 	remesherPeerNodeLabel = "remesher.tsuru.io/peer-node"
 	calicoTimeout         = time.Second * 5
 
-	BGPPeersSyncFailed  = "BGPPeersSyncFailed"
+	// BGPPeersSyncFailed is the reason used on events to denote a failed sync
+	BGPPeersSyncFailed = "BGPPeersSyncFailed"
+
+	// BGPPeersSyncSuccess is the reason used on events to denote a successful sync
 	BGPPeersSyncSuccess = "BGPPeersSyncSuccess"
 )
 
@@ -76,6 +79,7 @@ type controller struct {
 	workqueueLen      prometheus.GaugeFunc
 }
 
+// Config is a container for the Controller configuration options
 type Config struct {
 	CalicoClient         calicoclientv3.Interface
 	KubeClient           kubernetes.Interface
@@ -87,6 +91,8 @@ type Config struct {
 	LeaderElectionConfig leaderelection.LeaderElectionConfig
 }
 
+// Start starts the Remesher controller that watches for node events and reconcile the BGPPeers in Calico
+// The controller uses leader election to make sure a single instance is handling events
 func Start(c Config, stopCh <-chan struct{}) error {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(c.Logger.Infof)
