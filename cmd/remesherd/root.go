@@ -48,7 +48,7 @@ func init() {
 	rootCmd.PersistentFlags().Duration("leader-elect.renew-deadline", time.Second*10,
 		"The interval between attempts by the acting master to renew a leadership slot "+
 			"before it stops leading. This must be less than or equal to the lease duration. ")
-	rootCmd.PersistentFlags().Duration("leader-elect.retry-period", time.Second*15,
+	rootCmd.PersistentFlags().Duration("leader-elect.retry-period", time.Second*5,
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
 }
 
