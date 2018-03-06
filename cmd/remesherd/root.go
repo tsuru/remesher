@@ -107,7 +107,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		go servePrometheusMetrics(viper.GetString("metrics-port"), stopCh, log)
-		controller.Start(controller.Config{
+		err = controller.Start(controller.Config{
 			KubeClient:        kubeClient,
 			CalicoClient:      calicoClient,
 			Logger:            logrus.NewEntry(log),
@@ -121,14 +121,10 @@ var rootCmd = &cobra.Command{
 				LeaseDuration: viper.GetDuration("leader-elect.lease-duration"),
 			},
 		}, stopCh)
+		if err != nil {
+			log.WithError(err).Print("error running controller")
+		}
 	},
-}
-
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
 }
 
 func setupSignalHandler() (stopCh <-chan struct{}) {
@@ -144,19 +140,21 @@ func setupSignalHandler() (stopCh <-chan struct{}) {
 }
 
 func servePrometheusMetrics(port string, stopCh <-chan struct{}, logger *logrus.Logger) {
-	var server *http.Server
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	server := &http.Server{Addr: fmt.Sprintf(":%v", port), Handler: mux}
 	go func(server *http.Server) {
-		logger.WithField("port", port).Info("Starting prometheus metrics endpoint")
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		server = &http.Server{Addr: fmt.Sprintf(":%v", port), Handler: mux}
-		err := server.ListenAndServe()
-		if err == http.ErrServerClosed {
-			logger.Info("Prometheus metrics endpoint server closed")
-			return
+		for {
+			logger.WithField("port", port).Info("Starting prometheus metrics endpoint")
+			err := server.ListenAndServe()
+			if err == http.ErrServerClosed {
+				logger.Info("Prometheus metrics endpoint server closed")
+				return
+			}
+			logger.WithError(err).Error("Prometheus metrics endpoint failed, trying to restart it...")
+			time.Sleep(1 * time.Second)
+			server = &http.Server{Addr: fmt.Sprintf(":%v", port), Handler: mux}
 		}
-		logger.WithError(err).Error("Prometheus metrics endpoint failed, trying to restart it...")
-		time.Sleep(1 * time.Second)
 	}(server)
 
 	<-stopCh
