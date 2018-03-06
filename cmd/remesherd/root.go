@@ -24,7 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var Version = "1.0.0"
+var Version = "0.0.1"
 
 var (
 	cfgFile string
@@ -91,7 +91,8 @@ func initLogging() {
 }
 
 var rootCmd = &cobra.Command{
-	Use: "remesher",
+	Version: Version,
+	Use:     "remesher",
 	Run: func(cmd *cobra.Command, args []string) {
 		stopCh := setupSignalHandler()
 		log := logrus.New()

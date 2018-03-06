@@ -1,5 +1,10 @@
 package main
 
+import "github.com/sirupsen/logrus"
+
 func main() {
-	rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		logrus.Fatal(err)
+	}
 }

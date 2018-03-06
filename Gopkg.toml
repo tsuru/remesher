@@ -41,6 +41,10 @@
   name = "github.com/Azure/go-autorest"
   revision = "58f6f26e200fa5dfb40c9cd1c83f3e2c860d779d"
 
+[[constraint]]
+  name = "github.com/spf13/cobra"
+  branch = "master"
+
 [prune]
   go-tests = true
   unused-packages = true
