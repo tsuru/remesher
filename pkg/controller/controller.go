@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -13,10 +12,8 @@ import (
 
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/client"
-	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
-	calicoerrors "github.com/projectcalico/libcalico-go/lib/errors"
-	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/sirupsen/logrus"
+	"github.com/tsuru/remesher/pkg/calico"
 	corev1 "k8s.io/api/core/v1"
 	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,8 +67,7 @@ type controller struct {
 
 	neighborhoodLabel string
 
-	//TODO: extract this to another pkg and require a minimal interface here
-	calicoClient calicoclientv3.BGPPeerInterface
+	calicoClient calico.BGPPeerInterface
 
 	metricsRegisterer prometheus.Registerer
 	errorsCounter     prometheus.Counter
@@ -81,7 +77,7 @@ type controller struct {
 
 // Config is a container for the Controller configuration options
 type Config struct {
-	CalicoClient         calicoclientv3.BGPPeerInterface
+	CalicoClient         calico.BGPPeerInterface
 	KubeClient           kubernetes.Interface
 	Logger               *logrus.Entry
 	Namespace            string
@@ -149,7 +145,7 @@ func newController(kubeclientset kubernetes.Interface,
 	recorder record.EventRecorder,
 	logger *logrus.Entry,
 	label string,
-	calicoClient calicoclientv3.BGPPeerInterface,
+	calicoClient calico.BGPPeerInterface,
 	metricsRegistry prometheus.Registerer) *controller {
 
 	controller := &controller{
@@ -333,14 +329,8 @@ func (c *controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *l
 	var errors *multierror.Error
 	var added int
 	for _, p := range toAdd {
-		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-		_, err := c.calicoClient.Create(ctx, &p, options.SetOptions{})
-		cancel()
+		err := c.calicoClient.Create(&p)
 		if err != nil {
-			if _, ok := err.(calicoerrors.ErrorResourceAlreadyExists); ok {
-				logger.Infof("ignoring error creating bgpPeer %v: %v", p.Name, err)
-				continue
-			}
 			errors = multierror.Append(errors, err)
 			continue
 		}
@@ -368,14 +358,8 @@ func (c *controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 			logger.Infof("skipping peer %v: unmanaged due to missing label %q", p.Name, remesherManagedLabel)
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-		_, err := c.calicoClient.Delete(ctx, p.Name, options.DeleteOptions{})
-		cancel()
+		err := c.calicoClient.Delete(p.Name)
 		if err != nil {
-			if _, ok := err.(calicoerrors.ErrorResourceDoesNotExist); ok {
-				logger.Infof("ignoring error deleting bgpPeer %v: %v", p.Name, err)
-				continue
-			}
 			errors = multierror.Append(errors, err)
 			continue
 		}
@@ -386,12 +370,7 @@ func (c *controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 
 // getCurrentBGPPeers returns all BGPPeers that directly refer the node in calico (both ways)
 func (c *controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool) ([]calicoapiv3.BGPPeer, error) {
-	// TODO: we should have a way to cache bgppeers to reduce the number of api calls
-	// perhaps using the Kubernetes API directly thru listers with caching instead of
-	// using the calico client (which means we would only support kubernetes backend)
-	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-	defer cancel()
-	list, err := c.calicoClient.List(ctx, options.ListOptions{})
+	list, err := c.calicoClient.List()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", nodeName, err)
 	}

@@ -102,7 +102,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Error creating kubernetes client: %v", err)
 		}
-		calicoClient, err := calico.NewBGPPeerClient()
+		calicoClient, err := calico.NewBGPPeerClient(logrus.NewEntry(log), time.Second*5)
 		if err != nil {
 			log.Fatalf("Error creating calico client: %v", err)
 		}
