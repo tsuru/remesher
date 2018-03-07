@@ -51,6 +51,7 @@ func init() {
 			"before it stops leading. This must be less than or equal to the lease duration. ")
 	rootCmd.PersistentFlags().Duration("leader-elect.retry-period", time.Second*5,
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
+	rootCmd.PersistentFlags().Duration("calico-timeout", time.Second*5, "The timeout duration of calico operations.")
 }
 
 func initConfig() {
@@ -102,7 +103,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Error creating kubernetes client: %v", err)
 		}
-		calicoClient, err := calico.NewBGPPeerClient(logrus.NewEntry(log), time.Second*5)
+		calicoClient, err := calico.NewBGPPeerClient(logrus.NewEntry(log), time.Second*5, prometheus.DefaultRegisterer)
 		if err != nil {
 			log.Fatalf("Error creating calico client: %v", err)
 		}
