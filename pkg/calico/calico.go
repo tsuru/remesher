@@ -62,6 +62,7 @@ func NewBGPPeerClient(logger *logrus.Entry, timeout time.Duration, metricsRegist
 		timeout:      timeout,
 		latencies:    latencies,
 		errors:       errors,
+		logger:       logger,
 	}, nil
 }
 
