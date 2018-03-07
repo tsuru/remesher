@@ -40,7 +40,6 @@ const (
 	asNumber              = client.GlobalDefaultASNumber
 	remesherManagedLabel  = "remesher.tsuru.io/managed"
 	remesherPeerNodeLabel = "remesher.tsuru.io/peer-node"
-	calicoTimeout         = time.Second * 5
 
 	// BGPPeersSyncFailed is the reason used on events to denote a failed sync
 	BGPPeersSyncFailed = "BGPPeersSyncFailed"
