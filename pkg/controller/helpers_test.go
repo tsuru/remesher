@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"testing"
 
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
@@ -20,40 +21,40 @@ func Test_diff(t *testing.T) {
 		{
 			name: "all to be added",
 			desired: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 			wantToAdd: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 		},
 		{
 			name: "all to be removed",
 			current: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 			wantToRemove: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 		},
 		{
 			name: "some to add and some to remove",
 			current: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 			desired: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.1", true),
-				newBGPPeer("node1", "192.168.0.3", true),
+				newBGPPeer("node1", "192.168.0.1", "", true),
+				newBGPPeer("node1", "192.168.0.3", "", true),
 			},
 			wantToRemove: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.2", true),
+				newBGPPeer("node1", "192.168.0.2", "", true),
 			},
 			wantToAdd: []calicoapiv3.BGPPeer{
-				newBGPPeer("node1", "192.168.0.3", true),
+				newBGPPeer("node1", "192.168.0.3", "", true),
 			},
 		},
 	}
@@ -267,8 +268,11 @@ func newNode(name, address string, labels map[string]string) *corev1.Node {
 	}
 }
 
-func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
+func newBGPPeer(node, peerIP, peerNode string, managed bool) calicoapiv3.BGPPeer {
 	peer := calicoapiv3.BGPPeer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("%v-%v", node, peerIP),
+		},
 		Spec: calicoapiv3.BGPPeerSpec{
 			Node:     node,
 			PeerIP:   peerIP,
@@ -279,6 +283,9 @@ func newBGPPeer(node, peerIP string, managed bool) calicoapiv3.BGPPeer {
 		peer.ObjectMeta.Labels = map[string]string{
 			remesherManagedLabel: "true",
 		}
+	}
+	if peerNode != "" {
+		peer.ObjectMeta.Labels[remesherPeerNodeLabel] = peerNode
 	}
 	return peer
 }

@@ -376,7 +376,7 @@ func (c *controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool)
 	}
 	var peers []calicoapiv3.BGPPeer
 	for _, p := range list.Items {
-		if (includeAllGlobals && p.Spec.Node == "") || p.Annotations[remesherPeerNodeLabel] == nodeName {
+		if (includeAllGlobals && p.Spec.Node == "") || p.Labels[remesherPeerNodeLabel] == nodeName {
 			peers = append(peers, p)
 		}
 		if p.Spec.Node == nodeName {
