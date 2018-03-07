@@ -188,8 +188,9 @@ func newController(kubeclientset kubernetes.Interface,
 	controller.metricsRegisterer = metricsRegistry
 	controller.workqueueDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Name: "remesher_controller_process_duration",
-			Help: "The duration of the item processing in seconds.",
+			Name:    "remesher_controller_process_duration",
+			Help:    "The duration of the item processing in seconds.",
+			Buckets: prometheus.LinearBuckets(1, 2, 30),
 		},
 	)
 	controller.errorsCounter = prometheus.NewCounter(
