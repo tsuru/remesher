@@ -71,7 +71,7 @@ type controller struct {
 	neighborhoodLabel string
 
 	//TODO: extract this to another pkg and require a minimal interface here
-	calicoClient calicoclientv3.Interface
+	calicoClient calicoclientv3.BGPPeerInterface
 
 	metricsRegisterer prometheus.Registerer
 	errorsCounter     prometheus.Counter
@@ -81,7 +81,7 @@ type controller struct {
 
 // Config is a container for the Controller configuration options
 type Config struct {
-	CalicoClient         calicoclientv3.Interface
+	CalicoClient         calicoclientv3.BGPPeerInterface
 	KubeClient           kubernetes.Interface
 	Logger               *logrus.Entry
 	Namespace            string
@@ -149,7 +149,7 @@ func newController(kubeclientset kubernetes.Interface,
 	recorder record.EventRecorder,
 	logger *logrus.Entry,
 	label string,
-	calicoClient calicoclientv3.Interface,
+	calicoClient calicoclientv3.BGPPeerInterface,
 	metricsRegistry prometheus.Registerer) *controller {
 
 	controller := &controller{
@@ -334,7 +334,7 @@ func (c *controller) reconcile(current, desired []calicoapiv3.BGPPeer, logger *l
 	var added int
 	for _, p := range toAdd {
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-		_, err := c.calicoClient.BGPPeers().Create(ctx, &p, options.SetOptions{})
+		_, err := c.calicoClient.Create(ctx, &p, options.SetOptions{})
 		cancel()
 		if err != nil {
 			if _, ok := err.(calicoerrors.ErrorResourceAlreadyExists); ok {
@@ -369,7 +369,7 @@ func (c *controller) removePeers(peers []calicoapiv3.BGPPeer, logger *logrus.Ent
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
-		_, err := c.calicoClient.BGPPeers().Delete(ctx, p.Name, options.DeleteOptions{})
+		_, err := c.calicoClient.Delete(ctx, p.Name, options.DeleteOptions{})
 		cancel()
 		if err != nil {
 			if _, ok := err.(calicoerrors.ErrorResourceDoesNotExist); ok {
@@ -391,7 +391,7 @@ func (c *controller) getCurrentBGPPeers(nodeName string, includeAllGlobals bool)
 	// using the calico client (which means we would only support kubernetes backend)
 	ctx, cancel := context.WithTimeout(context.Background(), calicoTimeout)
 	defer cancel()
-	list, err := c.calicoClient.BGPPeers().List(ctx, options.ListOptions{})
+	list, err := c.calicoClient.List(ctx, options.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list bgp peers for node %q: %v", nodeName, err)
 	}

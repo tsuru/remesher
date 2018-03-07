@@ -13,7 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	calicoclientv3 "github.com/projectcalico/libcalico-go/lib/clientv3"
+	"github.com/tsuru/remesher/pkg/calico"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -101,11 +102,10 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Error creating kubernetes client: %v", err)
 		}
-		calicoClient, err := calicoclientv3.NewFromEnv()
+		calicoClient, err := calico.NewBGPPeerClient()
 		if err != nil {
 			log.Fatalf("Error creating calico client: %v", err)
 		}
-
 		go servePrometheusMetrics(viper.GetString("metrics-port"), stopCh, log)
 		err = controller.Start(controller.Config{
 			KubeClient:        kubeClient,
