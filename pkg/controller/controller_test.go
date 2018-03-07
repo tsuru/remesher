@@ -47,7 +47,7 @@ func Test_controller_getCurrentBGPPeers(t *testing.T) {
 			want:              []calicoapiv3.BGPPeer{newBGPPeer("node1", "192.168.1.1", "", true), newBGPPeer("", "192.168.1.1", "", true)},
 		},
 		{
-			name:              "include-peers-refering-node",
+			name:              "include-peers-referring-node",
 			nodeName:          "node1",
 			includeAllGlobals: true,
 			peers:             []calicoapiv3.BGPPeer{newBGPPeer("node2", "192.168.1.1", "node1", true), newBGPPeer("", "192.168.1.1", "", true)},
