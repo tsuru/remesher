@@ -69,10 +69,11 @@ func Test_diff(t *testing.T) {
 
 func Test_buildPeer(t *testing.T) {
 	tests := []struct {
-		name string
-		from *corev1.Node
-		to   *corev1.Node
-		want calicoapiv3.BGPPeer
+		name    string
+		from    *corev1.Node
+		to      *corev1.Node
+		want    calicoapiv3.BGPPeer
+		wantErr error
 	}{
 		{
 			name: "global",
@@ -91,11 +92,18 @@ func Test_buildPeer(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "to-node-address",
+			to:      newNode("node1", "", nil),
+			want:    calicoapiv3.BGPPeer{},
+			wantErr: errNoAddress,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildPeer(tt.from, tt.to)
+			got, err := buildPeer(tt.from, tt.to)
 			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.wantErr, err)
 		})
 	}
 }
@@ -259,13 +267,16 @@ func Test_buildMesh(t *testing.T) {
 }
 
 func newNode(name, address string, labels map[string]string) *corev1.Node {
-	return &corev1.Node{
+	n := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: labels,
 		},
-		Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: address}}},
 	}
+	if address != "" {
+		n.Status = corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Address: address}}}
+	}
+	return n
 }
 
 func newBGPPeer(node, peerIP, peerNode string, managed bool) calicoapiv3.BGPPeer {

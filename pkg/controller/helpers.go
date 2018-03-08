@@ -1,12 +1,15 @@
 package controller
 
 import (
+	"errors"
 	"strings"
 
 	calicoapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+var errNoAddress = errors.New("node missing address")
 
 func diff(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGPPeer, toRemove []calicoapiv3.BGPPeer) {
 	currMap := make(map[calicoapiv3.BGPPeerSpec]calicoapiv3.BGPPeer)
@@ -28,8 +31,11 @@ func diff(current, desired []calicoapiv3.BGPPeer) (toAdd []calicoapiv3.BGPPeer, 
 
 // buildPeer builds a BGPPeer using from as Node and to IP as PeerIP
 // creates a global bgpPEer if from is not set
-func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
+func buildPeer(from, to *corev1.Node) (calicoapiv3.BGPPeer, error) {
 	//TODO: consider nodes with multiple addresses, maybe thru an annotation on the node?
+	if len(to.Status.Addresses) == 0 {
+		return calicoapiv3.BGPPeer{}, errNoAddress
+	}
 	var name, node string
 	if from != nil {
 		name = strings.ToLower(kubeNameRegex.ReplaceAllString(from.Name+"-"+to.Name, "-"))
@@ -50,7 +56,7 @@ func buildPeer(from, to *corev1.Node) calicoapiv3.BGPPeer {
 			PeerIP:   to.Status.Addresses[0].Address,
 			ASNumber: asNumber,
 		},
-	}
+	}, nil
 }
 
 func isGlobal(node *corev1.Node) bool {
@@ -63,19 +69,28 @@ func isGlobal(node *corev1.Node) bool {
 func buildMesh(node *corev1.Node, toNodes []*corev1.Node) []calicoapiv3.BGPPeer {
 	var peers []calicoapiv3.BGPPeer
 	if isGlobal(node) {
-		peers = append(peers, buildPeer(nil, node))
+		if p, err := buildPeer(nil, node); err == nil {
+			peers = append(peers, p)
+		}
 	}
 	for _, n := range toNodes {
 		if node.Name == n.Name {
 			continue
 		}
 		if !isGlobal(n) {
-			peers = append(peers, buildPeer(node, n))
+			if p, err := buildPeer(node, n); err == nil {
+				peers = append(peers, p)
+			}
+
 		} else {
-			peers = append(peers, buildPeer(nil, n))
+			if p, err := buildPeer(nil, n); err == nil {
+				peers = append(peers, p)
+			}
 		}
 		if !isGlobal(node) {
-			peers = append(peers, buildPeer(n, node))
+			if p, err := buildPeer(n, node); err == nil {
+				peers = append(peers, p)
+			}
 		}
 	}
 	return peers
