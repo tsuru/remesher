@@ -390,16 +390,13 @@ func (c *controller) getBGPNeighbors(node *corev1.Node) ([]*corev1.Node, error) 
 	if isGlobal(node) {
 		return c.nodesInformer.Lister().List(labels.Everything())
 	}
-	v, ok := node.Labels[c.neighborhoodLabel]
-	if !ok {
-		c.logger.WithField("node", node.Name).Infof("missing neighborsLabel %q", c.neighborhoodLabel)
-		// TODO: if the label is missing, consider returning all nodes (except for the masters/global peers)
-		return nil, nil
-	}
 	queries := map[string]string{
-		c.neighborhoodLabel: v,
-		masterLabel:         "true",
-		globalLabel:         "true",
+		masterLabel: "true",
+		globalLabel: "true",
+	}
+	v, ok := node.Labels[c.neighborhoodLabel]
+	if ok {
+		queries[c.neighborhoodLabel] = v
 	}
 	var nodes []*corev1.Node
 	for k, v := range queries {
