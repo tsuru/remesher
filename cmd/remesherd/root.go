@@ -52,6 +52,7 @@ func init() {
 	rootCmd.PersistentFlags().Duration("leader-elect.retry-period", time.Second*5,
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
 	rootCmd.PersistentFlags().Duration("calico-timeout", time.Second*5, "The timeout duration of calico operations.")
+	rootCmd.PersistentFlags().Duration("nodes.resync-interval", time.Minute*5, "The resync interval for the node informer.")
 }
 
 func initConfig() {
@@ -121,6 +122,7 @@ var rootCmd = &cobra.Command{
 				RetryPeriod:   viper.GetDuration("leader-elect.retry-period"),
 				LeaseDuration: viper.GetDuration("leader-elect.lease-duration"),
 			},
+			ResyncInterval: viper.GetDuration("nodes.resync-interval"),
 		}, stopCh)
 		if err != nil {
 			log.WithError(err).Print("error running controller")
