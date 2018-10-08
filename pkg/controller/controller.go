@@ -84,6 +84,7 @@ type Config struct {
 	NeighborhoodLabel    string
 	MetricsRegisterer    prometheus.Registerer
 	LeaderElectionConfig leaderelection.LeaderElectionConfig
+	ResyncInterval       time.Duration
 }
 
 // Start starts the Remesher controller that watches for node events and reconcile the BGPPeers in Calico
@@ -94,7 +95,7 @@ func Start(c Config, stopCh <-chan struct{}) error {
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events(c.Namespace)})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, time.Second*30)
+	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, c.ResyncInterval)
 	run := func(stopCh <-chan struct{}) {
 		nodeInformer := kubeInformerFactory.Core().V1().Nodes()
 		ctl := newController(
