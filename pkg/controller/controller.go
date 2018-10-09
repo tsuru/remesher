@@ -92,7 +92,7 @@ type Config struct {
 func Start(c Config, stopCh <-chan struct{}) error {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(c.Logger.Infof)
-	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events(c.Namespace)})
+	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events("")})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, c.ResyncInterval)
