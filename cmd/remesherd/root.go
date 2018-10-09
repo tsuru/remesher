@@ -137,6 +137,8 @@ func setupSignalHandler() (stopCh <-chan struct{}) {
 	go func() {
 		<-c
 		close(stop)
+		<-c
+		os.Exit(1)
 	}()
 
 	return stop
