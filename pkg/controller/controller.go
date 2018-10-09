@@ -72,6 +72,8 @@ type controller struct {
 	errorsCounter     prometheus.Counter
 	workqueueDuration prometheus.Histogram
 	workqueueLen      prometheus.GaugeFunc
+
+	resyncInterval time.Duration
 }
 
 // Config is a container for the Controller configuration options
@@ -106,6 +108,7 @@ func Start(c Config, stopCh <-chan struct{}) error {
 			c.NeighborhoodLabel,
 			c.CalicoClient,
 			c.MetricsRegisterer,
+			c.ResyncInterval,
 		)
 		// this needs to be done after a call to nodeInformer.Informer()
 		go kubeInformerFactory.Start(stopCh)
@@ -146,7 +149,8 @@ func newController(kubeclientset kubernetes.Interface,
 	logger *logrus.Entry,
 	label string,
 	calicoClient calico.BGPPeerInterface,
-	metricsRegistry prometheus.Registerer) *controller {
+	metricsRegistry prometheus.Registerer,
+	resyncInterval time.Duration) *controller {
 
 	controller := &controller{
 		kubeclientset:     kubeclientset,
@@ -157,6 +161,7 @@ func newController(kubeclientset kubernetes.Interface,
 		logger:            logger,
 		neighborhoodLabel: label,
 		calicoClient:      calicoClient,
+		resyncInterval:    resyncInterval,
 	}
 
 	logger.Info("Setting up event handlers")
@@ -176,6 +181,12 @@ func newController(kubeclientset kubernetes.Interface,
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
+			oldNode := old.(*corev1.Node)
+			newNode := old.(*corev1.Node)
+			if labelsEquals(oldNode.ObjectMeta, newNode.ObjectMeta, controller.neighborhoodLabel, globalLabel, masterLabel) {
+				controller.logger.WithField("op", "update").Debugf("skipping node %q, unchanged labels", oldNode.Name)
+				return
+			}
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
 				controller.workqueue.Add(key)
@@ -210,6 +221,15 @@ func newController(kubeclientset kubernetes.Interface,
 	return controller
 }
 
+func labelsEquals(obj1, obj2 metav1.ObjectMeta, labels ...string) bool {
+	for _, l := range labels {
+		if obj1.Labels[l] != obj2.Labels[l] {
+			return false
+		}
+	}
+	return true
+}
+
 // Run runs the controller which starts workers to process the work queue
 func (c *controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
@@ -221,16 +241,34 @@ func (c *controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
-	c.logger.Info("Starting workers")
+	c.logger.Infof("Starting resync loop with interval %v", c.resyncInterval)
+	go wait.Until(c.resync, c.resyncInterval, stopCh)
+
+	c.logger.Infof("Starting %v workers", numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
 
-	c.logger.Info("Started workers")
+	c.logger.Infof("Started %v workers", numWorkers)
 	<-stopCh
 	c.logger.Info("Shutting down workers")
 
 	return nil
+}
+
+func (c *controller) resync() {
+	nodes, err := c.nodesInformer.Lister().List(labels.Everything())
+	if err != nil {
+		c.logger.WithField("op", "resync").Errorf("failed to list nodes: %v", err)
+		return
+	}
+	for _, n := range nodes {
+		key, err := cache.MetaNamespaceKeyFunc(n)
+		if err == nil {
+			c.workqueue.Add(key)
+			c.logger.WithField("op", "resync").Infof("added %s to workqueue", key)
+		}
+	}
 }
 
 func (c *controller) shutdown() {
