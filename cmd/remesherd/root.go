@@ -5,13 +5,13 @@ import (
 	"os"
 	"strings"
 
-	"k8s.io/client-go/tools/leaderelection"
-
 	"context"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"k8s.io/client-go/tools/leaderelection"
 
 	"github.com/tsuru/remesher/pkg/calico"
 
@@ -53,6 +53,7 @@ func init() {
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
 	rootCmd.PersistentFlags().Duration("calico-timeout", time.Second*5, "The timeout duration of calico operations.")
 	rootCmd.PersistentFlags().Duration("nodes.resync-interval", time.Minute*5, "The resync interval for the node informer.")
+	rootCmd.PersistentFlags().Bool("dry", false, "Enable dry run mode, disabling bgppeers deletion and creation.")
 }
 
 func initConfig() {
@@ -99,7 +100,6 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		stopCh := setupSignalHandler()
 		log := logrus.New()
-
 		kubeClient, err := k8s.NewClientset(viper.GetString("master-url"), viper.GetString("kubeconfig"))
 		if err != nil {
 			log.Fatalf("Error creating kubernetes client: %v", err)
@@ -108,8 +108,12 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Error creating calico client: %v", err)
 		}
+		dry := viper.GetBool("dry")
+		if dry {
+			calicoClient = calico.NewDryBGPPeerClient(calicoClient, logrus.NewEntry(log))
+		}
 		go servePrometheusMetrics(viper.GetString("metrics-port"), stopCh, log)
-		err = controller.Start(controller.Config{
+		config := controller.Config{
 			KubeClient:        kubeClient,
 			CalicoClient:      calicoClient,
 			Logger:            logrus.NewEntry(log),
@@ -117,13 +121,17 @@ var rootCmd = &cobra.Command{
 			NeighborhoodLabel: viper.GetString("neighborhood-label"),
 			NumWorkers:        viper.GetInt("num-workers"),
 			MetricsRegisterer: prometheus.DefaultRegisterer,
-			LeaderElectionConfig: leaderelection.LeaderElectionConfig{
+			ResyncInterval:    viper.GetDuration("nodes.resync-interval"),
+			RecordEvents:      !dry,
+		}
+		if !dry {
+			config.LeaderElectionConfig = &leaderelection.LeaderElectionConfig{
 				RenewDeadline: viper.GetDuration("leader-elect.renew-deadline"),
 				RetryPeriod:   viper.GetDuration("leader-elect.retry-period"),
 				LeaseDuration: viper.GetDuration("leader-elect.lease-duration"),
-			},
-			ResyncInterval: viper.GetDuration("nodes.resync-interval"),
-		}, stopCh)
+			}
+		}
+		err = controller.Start(config, stopCh)
 		if err != nil {
 			log.WithError(err).Print("error running controller")
 		}

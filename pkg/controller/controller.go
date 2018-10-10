@@ -85,16 +85,19 @@ type Config struct {
 	NumWorkers           int
 	NeighborhoodLabel    string
 	MetricsRegisterer    prometheus.Registerer
-	LeaderElectionConfig leaderelection.LeaderElectionConfig
+	LeaderElectionConfig *leaderelection.LeaderElectionConfig
 	ResyncInterval       time.Duration
+	RecordEvents         bool
 }
 
 // Start starts the Remesher controller that watches for node events and reconcile the BGPPeers in Calico
 // The controller uses leader election to make sure a single instance is handling events
 func Start(c Config, stopCh <-chan struct{}) error {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(c.Logger.Infof)
-	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events("")})
+	if c.RecordEvents {
+		eventBroadcaster.StartLogging(c.Logger.Infof)
+		eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: c.KubeClient.CoreV1().Events("")})
+	}
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(c.KubeClient, c.ResyncInterval)
@@ -116,7 +119,10 @@ func Start(c Config, stopCh <-chan struct{}) error {
 			c.Logger.WithError(err).Warn("failure running controller")
 		}
 	}
-
+	if c.LeaderElectionConfig == nil {
+		run(stopCh)
+		return nil
+	}
 	id, err := os.Hostname()
 	if err != nil {
 		return fmt.Errorf("failed to get hostname: %v", err)
@@ -138,7 +144,7 @@ func Start(c Config, stopCh <-chan struct{}) error {
 			c.Logger.Info("leaderelection lost")
 		},
 	}
-	leaderelection.RunOrDie(c.LeaderElectionConfig)
+	leaderelection.RunOrDie(*c.LeaderElectionConfig)
 	return nil
 }
 
